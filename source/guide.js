@@ -60,6 +60,9 @@ const GLOSS = {
   influencer: ['Peser sur un vote', "En tant que Notable : un don aux factions déplace le vote (et augmente votre prestige), la corruption le déplace plus fort mais attire la suspicion. Une faveur d'un notable de l'île donne aussi des voix."],
   saisons: ['Saisons', "Une saison dure 90 jours. Les céréales abondent en été et manquent en hiver ; la pêche faiblit en automne, saison des tempêtes. Chaque début de saison apporte de nouveaux votes et de nouvelles options."],
   ruine: ['Ruine', "Si vous n'avez plus rien, la Banque vous avance 500 § et vous repartez Colporteur. Vos relations et votre fiabilité vous suivent ; votre prestige en prend un coup. On ne peut jamais s'endetter."],
+  afaire: ['À faire', "Tout ce qui demande votre attention : dangers (caisses vides, suspicion, pirates, marchandises qui se gâtent), contrats à saisir ou à livrer, marchandises qui attendent d'être vendues, et les meilleures occasions du moment. Le chiffre sur l'onglet compte les points qui demandent une action (hors opportunités)."],
+  comparer: ['Comparer les îles', "Les meilleures affaires connues : pour chaque bien, l'île où l'acheter et celle où le revendre, avec le gain estimé par unité, taxes et fret compris. Le tableau complet montre le prix de chaque bien sur chaque île : en vert le moins cher, en rouge le plus cher. Les prix des îles sans comptoir sont ceux de vos dernières nouvelles, d'où l'âge indiqué."],
+  revente: ['Meilleure revente', "L'île où ce bien vaut le plus, selon vos informations, et l'écart avec le prix d'ici. Si l'écart est grand, il y a peut-être une affaire à faire, à condition que le fret et le trajet ne mangent pas le gain. L'âge de l'information est indiqué quand elle n'est pas en direct."],
   marchenoir: ['Marché noir', "Là où un bien est interdit, des acheteurs discrets le paient plus du double de son prix ailleurs. Jusqu'à 20 unités par jour et par île ; chaque vente fait monter la suspicion."],
 };
 

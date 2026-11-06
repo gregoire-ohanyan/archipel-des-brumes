@@ -97,6 +97,7 @@ function frame(t) {
   }
   if (S()) {
     drawShips();
+    drawFx();
     if (ui.dirty && t - ui.lastRender > 450) render();
   }
   requestAnimationFrame(frame);
@@ -146,6 +147,7 @@ function buildMap() {
   <g id="routes"></g>
   <g id="islands"></g>
   <g id="ships"></g>
+  <g id="fx" pointer-events="none"></g>
   <g pointer-events="none" opacity=".5">
     ${fog(560, 640, 230, 70, 'fog', .5)}${fog(330, 560, 170, 55, 'fog b', .35)}${fog(700, 580, 150, 45, 'fog', .3)}${fog(640, 280, 120, 40, 'fog b', .18)}
   </g>
@@ -272,18 +274,17 @@ function renderMobile() {
   if (!isM()) return;
   document.querySelectorAll('#bnav button').forEach(b => {
     const v = b.dataset.v;
-    b.classList.toggle('on', v === 'carte' ? ui.mview === 'carte' : v === 'plus' ? (ui.mview === 'journal' || (ui.mview === 'panel' && !['bourse', 'navigation', 'entrepots'].includes(ui.tab))) : (ui.mview === 'panel' && ui.tab === v));
+    b.classList.toggle('on', v === 'carte' ? ui.mview === 'carte' : v === 'plus' ? (ui.mview === 'journal' || (ui.mview === 'panel' && !['afaire', 'bourse', 'navigation', 'entrepots'].includes(ui.tab))) : (ui.mview === 'panel' && ui.tab === v));
   });
   const i = I[ui.sel], pres = E.present(ui.sel);
   const raws = Object.keys(i.raw).map(g => G[g].name.toLowerCase()).join(', ') || 'finance et commerce';
   $('mcard').innerHTML = `<div><b>${esc(i.name)}</b> <span class="note">· ${esc(raws)}</span><br><span class="note">${pres ? 'Votre comptoir · bourse en direct' : `Pas de comptoir · nouvelles vieilles de ${E.infoDelay(ui.sel)} j`}</span></div>
     <button class="btn primary" data-act="mnav" data-v="bourse">Bourse ›</button>`;
-  const n = S().journal.length;
-  const badge = $('jbadge'); if (badge) { const unread = Math.max(0, n - (ui.jSeen || 0)); badge.textContent = unread ? Math.min(99, unread) : ''; badge.style.display = unread && ui.mview !== 'journal' ? '' : 'none'; }
-  if (ui.mview === 'journal') ui.jSeen = n;
+
 }
 function moreSheet() {
-  const items = [['influence', 'Influence', 'Réputation, contrats, personnages'], ['conseils', 'Conseils', 'Votes et lois des îles'], ['rumeurs', 'Rumeurs', 'Ce qui se murmure'],
+  const bd = badges();
+  const items = [['influence', 'Influence', bd.influence ? `${bd.influence} offre(s) de contrat` : 'Réputation, contrats, personnages'], ['conseils', 'Conseils', 'Votes et lois des îles'], ['rumeurs', 'Rumeurs', bd.rumeurs ? `${bd.rumeurs} rumeur(s) fraîche(s)` : 'Ce qui se murmure'],
     ['ateliers', 'Ateliers', P().unlocked[3] ? 'Transformer des biens' : 'Stade Manufacturier'], ['options', 'Options', P().unlocked[4] ? 'Parier sur les prix' : 'Stade Spéculateur']];
   openModal(`<div class="kicker">Menu</div><h1>Plus</h1><div class="sheet">
     ${items.map(([t, n, d]) => `<button class="sheet-item" data-act="mnav" data-v="${t}"><b>${n}</b><span>${d}</span></button>`).join('')}
@@ -299,6 +300,28 @@ function menuSheet() {
       <button class="sheet-item" data-act="save"><b>Sauvegarder</b><span>La partie est aussi sauvée tous les 5 jours</span></button>
       <button class="sheet-item" data-act="newgame-ask"><b>Nouvelle partie</b><span>Recommencer de zéro</span></button>
     </div><div class="actions"><button class="btn primary" data-act="close">Fermer</button></div>`);
+}
+
+// ---------------------------------------------------------------- gains et pertes sur la carte
+function drawFx() {
+  const list = S().fx;
+  if (!list || !list.length) return;
+  S().fx = [];
+  const layer = $('fx');
+  if (!layer || (isM() && ui.mview !== 'carte')) return;
+  const by = {};
+  list.forEach(x => { by[x.isl] = (by[x.isl] || 0) + x.v; });
+  Object.keys(by).forEach(isl => {
+    const v = by[isl]; if (Math.abs(v) < 1) return;
+    const i = PI(isl), r = islR(i);
+    const t = document.createElementNS(NS, 'text');
+    t.setAttribute('x', i.x); t.setAttribute('y', i.y - r - 6);
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('class', 'fxt ' + (v > 0 ? 'gain' : 'loss'));
+    t.textContent = (v > 0 ? '+' : '−') + fmt(Math.abs(v)) + ' §';
+    layer.appendChild(t);
+    setTimeout(() => t.remove(), 2200);
+  });
 }
 
 // ---------------------------------------------------------------- en-tête
@@ -324,30 +347,79 @@ function renderJournal() {
 
 // ---------------------------------------------------------------- onglets
 const TABS = [
-  { id: 'bourse', name: 'Bourse' }, { id: 'entrepots', name: 'Comptoirs' }, { id: 'navigation', name: 'Navigation' },
+  { id: 'afaire', name: 'À faire' }, { id: 'bourse', name: 'Bourse' }, { id: 'entrepots', name: 'Comptoirs' }, { id: 'navigation', name: 'Navigation' },
   { id: 'ateliers', name: 'Ateliers', stage: 3 }, { id: 'options', name: 'Options', stage: 4 },
   { id: 'influence', name: 'Influence' }, { id: 'conseils', name: 'Conseils' }, { id: 'rumeurs', name: 'Rumeurs' },
 ];
-function renderTabs() {
-  $('tabs').innerHTML = TABS.map(t => {
+function badges() {
+  const gd = E.gday();
+  const t = todo();
+  return {
+    afaire: t.count,
+    influence: S().contracts.filter(c => c.status === 'offre').length,
+    rumeurs: E.knownRumors().filter(r => r.heard > (ui.rSeen == null ? gd - 3 : ui.rSeen) && r.status === 'circule').length,
+  };
+}
+function renderTabs(bd) {
+  morph($('tabs'), TABS.map(t => {
     const locked = t.stage && !P().unlocked[t.stage];
-    return `<button class="${ui.tab === t.id ? 'on' : ''} ${locked ? 'locked' : ''}" data-act="tab" data-tab="${t.id}">${t.name}${locked ? '<span class="lock">🔒</span>' : ''}</button>`;
-  }).join('');
+    const n = bd[t.id] || 0;
+    return `<button class="${ui.tab === t.id ? 'on' : ''} ${locked ? 'locked' : ''}" data-act="tab" data-tab="${t.id}">${t.name}${locked ? '<span class="lock">🔒</span>' : ''}${n ? `<span class="tbadge">${n}</span>` : ''}</button>`;
+  }).join(''));
+  document.querySelectorAll('#bnav button').forEach(b => {
+    let n = 0;
+    if (b.dataset.v === 'afaire') n = bd.afaire;
+    if (b.dataset.v === 'plus') n = bd.influence + bd.rumeurs;
+    let el = b.querySelector('.tbadge');
+    if (n && !el) { el = document.createElement('span'); el.className = 'tbadge'; b.appendChild(el); }
+    if (el) { if (n) el.textContent = n; else el.remove(); }
+  });
+}
+// mise à jour en douceur : ne modifie que ce qui a changé (défilement, volets ouverts et saisie conservés)
+function morph(el, html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  morphChildren(el, tpl.content);
+}
+function morphChildren(a, b) {
+  const bn = Array.from(b.childNodes);
+  for (let i = 0; i < bn.length; i++) {
+    const nb = bn[i], na = a.childNodes[i];
+    if (!na) { a.appendChild(nb.cloneNode(true)); continue; }
+    if (na.nodeType !== nb.nodeType || na.nodeName !== nb.nodeName) { a.replaceChild(nb.cloneNode(true), na); continue; }
+    if (na.nodeType !== 1) { if (na.nodeValue !== nb.nodeValue) na.nodeValue = nb.nodeValue; continue; }
+    syncAttrs(na, nb);
+    morphChildren(na, nb);
+    if (na.tagName === 'SELECT' && document.activeElement !== na) { const o = nb.querySelector('option[selected]'); if (o && na.value !== o.value) na.value = o.value; }
+  }
+  while (a.childNodes.length > bn.length) a.removeChild(a.lastChild);
+}
+function syncAttrs(a, b) {
+  const keepOpen = a.tagName === 'DETAILS';
+  for (const at of Array.from(b.attributes)) {
+    if (keepOpen && at.name === 'open') continue;
+    if (a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value);
+  }
+  for (const at of Array.from(a.attributes)) if (!b.hasAttribute(at.name) && !(keepOpen && at.name === 'open')) a.removeAttribute(at.name);
+  if (a.tagName === 'INPUT' && document.activeElement !== a) {
+    if (a.type === 'checkbox' || a.type === 'radio') a.checked = b.hasAttribute('checked');
+    else { const v = b.getAttribute('value') || ''; if (a.value !== v) a.value = v; }
+  }
 }
 
 function render(force) {
   ui.lastRender = performance.now();
   renderTop(); renderJournal(); drawMarkers(); renderMobile();
   if (ui.routesDay !== E.gday()) { drawRoutes(); ui.routesDay = E.gday(); }
-  const ae = document.activeElement;
-  if (!force && ae && $('panel').contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT')) { updateTrade(); return; }
   ui.dirty = false;
-  renderTabs();
-  const fn = { bourse: pBourse, entrepots: pEntrepots, navigation: pNavigation, ateliers: pAteliers, options: pOptions, influence: pInfluence, conseils: pConseils, rumeurs: pRumeurs }[ui.tab];
-  const scroll = $('panel').scrollTop;
+  const bd = badges();
+  renderTabs(bd);
+  if (ui.tab === 'rumeurs') ui.rSeen = E.gday();
+  const fn = { afaire: pAfaire, bourse: pBourse, entrepots: pEntrepots, navigation: pNavigation, ateliers: pAteliers, options: pOptions, influence: pInfluence, conseils: pConseils, rumeurs: pRumeurs }[ui.tab];
   tutoAdvance();
-  $('panel').innerHTML = tutoCard() + fn();
-  $('panel').scrollTop = scroll;
+  if (force && ui.lastTab !== ui.tab) { $('panel').innerHTML = ''; ui.lastTab = ui.tab; }
+  morph($('panel'), tutoCard() + fn());
+  updateTrade();
 }
 
 // ---------------------------------------------------------------- aide contextuelle
@@ -445,13 +517,117 @@ function walkBook(isl, g, side, qty) {
   return { filled, avg: filled ? cost / filled : null, cost };
 }
 
+// ---------------------------------------------------------------- données connues (avec le brouillard)
+const SHORT = { port: 'Port-S.', ferre: 'Ferrecr.', verd: 'Verdanes', cora: 'Corallie', bois: 'Boisnoir', eclat: 'H.-Éclat', brum: 'Brumaille' };
+function known(isl, g) {
+  const k = E.knownSnap(isl);
+  if (k.live) { const b = S().books[isl][g]; return { p: b.ema, bid: E.bestBid(isl, g), ask: E.bestAsk(isl, g), delay: 0, live: true }; }
+  if (!k.snap) return null;
+  const v = k.snap.p[g];
+  return { p: v[0], bid: v[1], ask: v[2], delay: k.delay, live: false };
+}
+// meilleure île connue pour revendre un bien (hors île de départ)
+function bestResale(isl, g) {
+  let best = null;
+  ISLANDS.forEach(i => {
+    if (i.id === isl || S().isl[i.id].banned[g]) return;
+    const k = known(i.id, g); if (!k) return;
+    if (!best || k.p > best.p) best = { isl: i.id, p: k.p, delay: k.delay };
+  });
+  return best;
+}
+// meilleures affaires connues : acheter en A, revendre en B (en mettant en vente au cours), fret compris
+function deals(n) {
+  const best = {};
+  GOODS.forEach(g => ISLANDS.forEach(A => {
+    if (S().isl[A.id].banned[g.id]) return;
+    const ka = known(A.id, g.id); if (!ka) return;
+    const buy = ka.ask != null ? ka.ask : ka.p * 1.1;
+    const cost = buy * (1 + S().isl[A.id].tax);
+    ISLANDS.forEach(B => {
+      if (B.id === A.id || S().isl[B.id].banned[g.id] || E.embargoed(A.id, B.id)) return;
+      const kb = known(B.id, g.id); if (!kb) return;
+      const days = E.PATH[A.id][B.id].days;
+      if (G[g.id].perish > 0.02 && days > 4) return;
+      const sell = kb.p * 0.97 * (1 - S().isl[B.id].tax) - (S().isl[B.id].tariffs[g.id] || 0) * kb.p;
+      const gain = sell - cost - E.freightCost(days) - kb.p * G[g.id].perish * days;
+      const pc = gain / cost;
+      if (gain <= 0.3 || pc < 0.12) return;
+      const score = pc * Math.sqrt(gain) / (1 + days / 6);
+      if (!best[g.id] || score > best[g.id].score) best[g.id] = { g: g.id, A: A.id, B: B.id, buy, sell, gain, pc, days, score, delay: Math.max(ka.delay, kb.delay) };
+    });
+  }));
+  return Object.values(best).sort((a, b) => b.score - a.score).slice(0, n);
+}
+function ageTag(d) { return d ? `<span class="age">il y a ${d} j</span>` : '<span class="age live">direct</span>'; }
+
+// ---------------------------------------------------------------- À FAIRE
+function todo() {
+  const pl = P(), a = PA(), gd = E.gday();
+  const act = [], ctr = [], opp = [], dng = [];
+  const btn = (label, attrs) => `<button class="btn small" ${attrs}>${label}</button>`;
+  // stock qui attend d'être vendu
+  ISLANDS.forEach(i => {
+    const st = a.stock[i.id];
+    Object.keys(st).forEach(g => {
+      const q = st[g], b = S().books[i.id][g], val = q * b.ema;
+      if (val < 60) return;
+      if (S().isl[i.id].banned[g]) act.push({ t: `${fmt(q)} ${gname(g)} illicites dorment à ${i.name}.`, b: btn('Marché noir', `data-act="goto-good" data-isl="${i.id}" data-g="${g}"`) });
+      else if (!E.present(i.id)) act.push({ t: `${fmt(q)} ${gname(g)} sont bloqués à ${i.name}, où vous n'avez plus de comptoir.`, b: btn('Ouvrir un comptoir', `data-act="open-cpt" data-isl="${i.id}"`) });
+      else act.push({ t: `${fmt(q)} ${gname(g)} attendent à ${i.name} (≈ ${fmt(val)} §).`, b: btn('Vendre', `data-act="goto-good" data-isl="${i.id}" data-g="${g}"`) });
+    });
+  });
+  S().shipments.filter(s => s.owner === 'player' && s.arr - S().hour < 24).forEach(s => act.push({ t: `Votre convoi pour ${I[s.to].name} arrive dans ${Math.max(1, Math.round(s.arr - S().hour))} h.`, b: '' }));
+  pl.workshops.filter(w => w.on && !w.last).forEach(w => act.push({ t: `${RECIPES[w.recipe].name} de ${I[w.isl].name} à l'arrêt : ${w.status || 'en attente'}.`, b: btn('Voir', `data-act="tab" data-tab="ateliers"`) }));
+  S().journal.filter(j => j.cat === 'bourse' && j.d >= gd - 2 && /exécuté|expiré/.test(j.text)).slice(-3).reverse().forEach(j => act.push({ t: j.text, b: '', old: true }));
+  // contrats
+  S().contracts.forEach(c => {
+    const n = S().npcs[c.npc], have = E.stockOf(a, c.isl, c.g);
+    if (c.status === 'offre') ctr.push({ t: `${n.name} propose ${fmt(c.qty)} ${gname(c.g)} à livrer à ${I[c.isl].name}, payés ${fp(c.price)} § l'unité.`, b: btn('Voir', `data-act="tab" data-tab="influence"`) });
+    if (c.status === 'actif' && have >= c.qty) ctr.push({ t: `Vous pouvez livrer ${n.name} dès maintenant (${fmt(c.qty)} ${gname(c.g)} à ${I[c.isl].name}).`, b: btn('Livrer', `data-act="c-deliver" data-id="${c.id}"`), hot: true });
+    else if (c.status === 'actif' && c.deadline - gd <= 6) ctr.push({ t: `Plus que ${c.deadline - gd} j pour livrer ${fmt(c.qty)} ${gname(c.g)} à ${I[c.isl].name} (vous en avez ${fmt(have)}).`, b: btn('Voir', `data-act="tab" data-tab="influence"`), hot: true });
+  });
+  // dangers
+  const upkeep = pl.lastUpkeep || 0;
+  if (upkeep && a.cash < upkeep * 4) dng.push({ t: `Caisses presque vides : ${fmt(a.cash)} § pour ${fmt(upkeep)} § de frais par jour.`, b: btn('Mes biens', `data-act="tab" data-tab="entrepots"`) });
+  ISLANDS.forEach(i => { const s = S().isl[i.id].suspicion; if (s > 45) dng.push({ t: `Les autorités de ${i.name} vous soupçonnent (${Math.round(s)}/100)${s > 60 ? ' : une enquête est ouverte' : ''}.`, b: btn('Influence', `data-act="tab" data-tab="influence"`) }); });
+  S().shipments.filter(s => s.owner === 'player' && !s.escort && E.PATH[s.from][s.to].danger > 0.4).forEach(s => dng.push({ t: `Votre convoi vers ${I[s.to].name} passe par des eaux infestées de pirates, sans escorte.`, b: '' }));
+  ISLANDS.forEach(i => Object.keys(a.stock[i.id]).forEach(g => { if (G[g].perish >= 0.01 && a.stock[i.id][g] >= 40) dng.push({ t: `${fmt(a.stock[i.id][g])} ${gname(g)} se gâtent à ${i.name} (−${Math.round(G[g].perish * 100)} % par jour).`, b: btn('Vendre', `data-act="goto-good" data-isl="${i.id}" data-g="${g}"`) }); }));
+  if (E.seasonIdx() === 2 && S().shipments.some(s => s.owner === 'player')) dng.push({ t: `Saison des tempêtes : vos convois risquent de perdre une partie de leur cargaison.`, b: '' });
+  // opportunités
+  deals(3).forEach(d => opp.push({ t: `${G[d.g].name} : acheter à ${I[d.A].name} (${fp(d.buy)} §), revendre à ${I[d.B].name} (≈ ${fp(d.sell)} §) : <b>+${fp(d.gain)} § l'unité</b>, ${d.days} j de mer.`, b: btn('Voir', `data-act="goto-good" data-isl="${d.A}" data-g="${d.g}"`) }));
+  E.knownRumors().filter(r => r.heard >= gd - 3 && r.status === 'circule').slice(0, 2).forEach(r => opp.push({ t: `Rumeur fraîche : « ${esc(r.text)} »`, b: btn('Rumeurs', `data-act="tab" data-tab="rumeurs"`) }));
+  ISLANDS.forEach(i => { const p = S().council[i.id]; if (p && !p.resolved && p.vote - gd <= 7 && p.vote - gd >= 0) opp.push({ t: `Vote à ${i.name} dans ${p.vote - gd} j : « ${esc(p.text)} ».`, b: btn('Conseils', `data-act="tab" data-tab="conseils"`) }); });
+  const nw = E.netWorth();
+  const next = !pl.unlocked[2] ? [5000, 'Négociant'] : !pl.unlocked[3] ? [12000, 'Manufacturier'] : null;
+  if (next && nw >= next[0] * 0.75) opp.push({ t: `Plus que ${fmt(next[0] - nw)} § de valeur nette pour devenir ${next[1]}.`, b: '' });
+  return { act, ctr, opp, dng, count: act.filter(x => !x.old).length + ctr.length + dng.length };
+}
+function pAfaire() {
+  const t = todo();
+  let h = `<h2>À faire ${q('afaire')}</h2><p class="sub">Ce qui demande votre attention, et les occasions à saisir.</p>`;
+  const sec = (title, cls, items, empty) => {
+    let s = `<h4>${title}</h4>`;
+    if (!items.length) return s + `<p class="note">${empty}</p>`;
+    return s + `<ul class="todo ${cls}">` + items.map(x => `<li class="${x.hot ? 'hot' : ''} ${x.old ? 'old' : ''}"><span>${x.t}</span>${x.b || ''}</li>`).join('') + `</ul>`;
+  };
+  h += sec('Dangers', 'dng', t.dng, 'Rien à craindre pour l\'instant.');
+  h += sec('Contrats', 'ctr', t.ctr, P().unlocked[2] ? 'Aucun contrat en attente.' : 'Les marchands vous proposeront des contrats au stade Négociant.');
+  h += sec('Votre activité', 'act', t.act, 'Aucune marchandise en attente.');
+  h += sec('Opportunités', 'opp', t.opp, 'Aucune affaire évidente avec vos informations actuelles. Ouvrir des comptoirs ou engager des informateurs vous en révélera.');
+  h += `<div class="row-flex" style="margin-top:12px"><button class="btn" data-act="bview" data-v="tout">Comparer tous les prix</button></div>`;
+  return h;
+}
+
 // ---------------------------------------------------------------- BOURSE
 function pBourse() {
+  const seg = `<div class="seg"><button class="${ui.bview !== 'tout' ? 'on' : ''}" data-act="bview" data-v="ile">Cette île</button><button class="${ui.bview === 'tout' ? 'on' : ''}" data-act="bview" data-v="tout">Toutes les îles</button></div>`;
+  if (ui.bview === 'tout') return seg + pCompare();
   const isl = ui.sel, i = I[isl], st = S().isl[isl], pres = E.present(isl);
   const info = E.knownSnap(isl);
-  let h = `<h2>${esc(i.name)}</h2><p class="sub">${esc(i.desc)}</p><div class="chips">`;
+  let h = seg + `<h2>${esc(i.name)}</h2><p class="sub">${esc(i.desc)}</p><div class="chips">`;
   h += pres ? `<span class="chip green">Comptoir : bourse en direct ${q('comptoir')}</span>` : `<span class="chip blue">Nouvelles vieilles de ${info.delay} j ${q('nouvelles')}</span>`;
-  h += `<span class="chip">Taxe de bourse ${(st.tax * 100).toFixed(1).replace('.', ',')} % ${q('taxe')}</span><span class="chip">Salaire ${fp(st.wage)} §/j ${q('salaire')}</span>`;
+  h += `<span class="chip">Taxe ${(st.tax * 100).toFixed(1).replace('.', ',')} % ${q('taxe')}</span><span class="chip">Salaire ${fp(st.wage)} §/j ${q('salaire')}</span>`;
   const pop = STRATA.reduce((a, s) => a + st.strata[s].pop, 0);
   h += `<span class="chip">${fmt(pop)} habitants</span>`;
   if (E.striking(isl)) h += `<span class="chip red">Grève en cours ${q('greve')}</span>`;
@@ -462,40 +638,225 @@ function pBourse() {
   if ((P().banUntil[isl] || -1) > E.gday()) h += `<span class="chip red">Vous êtes exclu de cette bourse</span>`;
   h += `</div>`;
   if (pres) {
-    h += `<div class="grid2" style="margin-bottom:6px">` + STRATA.map(s => `<div><div class="row-flex" style="justify-content:space-between;font-size:13px"><span>${STRATA_NAMES[s]}</span><span class="muted">${fmt(st.strata[s].pop)} · ${Math.round(st.strata[s].sat * 100)} %</span></div>${bar(st.strata[s].sat)}</div>`).join('') + `</div><p class="note" style="margin-top:2px">${q('satisfaction')} Satisfaction des besoins par couche sociale. En dessous de 45 % chez les manouvriers, la grève menace.</p>`;
+    h += `<details class="fold" data-k="pop"><summary>Habitants : satisfaction des besoins ${q('satisfaction')}</summary><div class="grid2" style="margin:6px 0">` + STRATA.map(s => `<div><div class="row-flex" style="justify-content:space-between;font-size:13px"><span>${STRATA_NAMES[s]}</span><span class="muted">${fmt(st.strata[s].pop)} · ${Math.round(st.strata[s].sat * 100)} %</span></div>${bar(st.strata[s].sat)}</div>`).join('') + `</div><p class="note">En dessous de 45 % chez les manouvriers, la grève menace.</p></details>`;
   } else {
     h += `<div class="card hl"><b>Vous n'avez pas de comptoir ici.</b> Les prix ci-dessous datent d'il y a ${info.delay} jour(s). Pour commercer et voir la bourse en direct, ouvrez un comptoir.
       <div class="row-flex" style="margin-top:8px"><button class="btn primary" data-act="open-cpt" data-isl="${isl}">Ouvrir un comptoir (${E.COSTS.comptoir} § + ${E.COSTS.comptoirDay} §/j)</button>
       ${P().unlocked[2] && !P().informants.includes(isl) ? `<button class="btn" data-act="hire-inf" data-isl="${isl}">Engager un informateur (${E.COSTS.informant} § + ${E.COSTS.informantDay} §/j)</button>` : ''}</div></div>`;
   }
   if (ui.good) h += pDetail(isl, ui.good, pres, info);
-  else h += `<p class="hint">👉 Cliquez sur un bien pour l'acheter ou le vendre.</p>`;
-  h += `<table class="t"><thead><tr><th>Bien</th><th class="n">Prix ${q('prix')}</th><th class="n hide-m">5 j ${q('cinqj')}</th>${pres ? `<th class="n">Vous achetez à ${q('achetez')}</th><th class="n">Vous vendez à ${q('vendez')}</th>` : ''}<th class="n">Votre stock ${q('stock')}</th><th class="hide-m" title="Euphorie à droite, peur à gauche">Humeur ${q('humeur')}</th></tr></thead><tbody>`;
+  else h += `<p class="hint">👉 Touchez un bien pour l'acheter ou le vendre.</p>`;
+  h += `<table class="t market"><thead><tr><th>Bien</th><th class="n">Prix ${q('prix')}</th><th class="n hide-m">5 j ${q('cinqj')}</th>${pres ? `<th class="n"><span class="lg">Vous achetez à</span><span class="sm">Achat</span> ${q('achetez')}</th><th class="n hide-m">Vous vendez à ${q('vendez')}</th>` : ''}<th class="n"><span class="lg">Votre stock</span><span class="sm">Stock</span> ${q('stock')}</th><th><span class="lg">Meilleure revente</span><span class="sm">Revente</span> ${q('revente')}</th><th class="hide-m">Humeur ${q('humeur')}</th></tr></thead><tbody>`;
   let tier = -1;
   GOODS.forEach(g => {
-    if (g.tier !== tier) { tier = g.tier; h += `<tr class="tier"><td colspan="7">${['Matières brutes', 'Produits transformés', 'Composants', 'Produits finis'][tier]}</td></tr>`; }
+    if (g.tier !== tier) { tier = g.tier; h += `<tr class="tier"><td colspan="8">${['Matières brutes', 'Produits transformés', 'Composants', 'Produits finis'][tier]}</td></tr>`; }
     const b = S().books[isl][g.id];
     const mine = E.stockOf(PA(), isl, g.id);
-    let price, ch, vol, bid, ask;
+    let price = null, ch = 0, bid, ask;
     if (pres) {
-      price = b.ema; const hh = b.hist; ch = hh.length > 5 ? price / hh[hh.length - 6] - 1 : 0; vol = b.volEma; bid = E.bestBid(isl, g.id); ask = E.bestAsk(isl, g.id);
+      price = b.ema; const hh = b.hist; ch = hh.length > 5 ? price / hh[hh.length - 6] - 1 : 0; bid = E.bestBid(isl, g.id); ask = E.bestAsk(isl, g.id);
     } else if (info.snap) {
       const p = info.snap.p[g.id]; price = p[0];
-      const hs = info.hist; const prev = hs.length > 5 ? hs[hs.length - 6].p[g.id][0] : price; ch = price / prev - 1; vol = p[3];
+      const hs = info.hist; const prev = hs.length > 5 ? hs[hs.length - 6].p[g.id][0] : price; ch = price / prev - 1;
     }
     const banned = st.banned[g.id];
-    h += `<tr class="row ${ui.good === g.id ? 'sel' : ''}" data-act="sel-good" data-g="${g.id}"><td>${esc(g.name)}${banned ? ' <span class="tag" style="background:#f0d2c8">interdit</span>' : ''}</td>
+    const rs = bestResale(isl, g.id);
+    const rcell = rs && price ? `<span class="rs">${esc(SHORT[rs.isl])} <span class="lg">${fp(rs.p)}</span></span> <span class="${rs.p > price * 1.05 ? 'up' : rs.p < price * 0.95 ? 'down' : 'muted'}">${rs.p >= price ? '+' : '−'}${Math.round(Math.abs(rs.p / price - 1) * 100)} %</span>${rs.delay ? `<span class="age lg">${rs.delay} j</span>` : ''}` : '<span class="muted">—</span>';
+    h += `<tr class="row ${ui.good === g.id ? 'sel' : ''} ${mine ? 'own' : ''}" data-act="sel-good" data-g="${g.id}"><td>${esc(g.name)}${banned ? ' <span class="tag" style="background:#f0d2c8">interdit</span>' : ''}</td>
       <td class="n"><b>${fp(price)}</b></td><td class="n hide-m ${ch > 0.005 ? 'up' : ch < -0.005 ? 'down' : 'muted'}">${price != null ? pct(ch) : '—'}</td>
-      ${pres ? `<td class="n">${fp(ask)}</td><td class="n">${fp(bid)}</td>` : ''}
-      <td class="n">${mine ? '<b>' + fmt(mine) + '</b>' : '<span class="muted">·</span>'}</td><td class="hide-m">${pres ? sentBar(b.sent) : ''}</td></tr>`;
+      ${pres ? `<td class="n">${fp(ask)}</td><td class="n hide-m">${fp(bid)}</td>` : ''}
+      <td class="n">${mine ? '<b>' + fmt(mine) + '</b>' : '<span class="muted">·</span>'}</td><td class="rcell">${rcell}</td><td class="hide-m">${pres ? sentBar(b.sent) : ''}</td></tr>`;
   });
-  h += `</tbody></table><p class="note">« Vous achetez à » : le prix le moins cher proposé par un vendeur. « Vous vendez à » : le meilleur prix proposé par un acheteur. L'écart entre les deux est normal ${q('ecart')}. Humeur : euphorie à droite, peur à gauche.</p>`;
+  h += `</tbody></table><p class="note">Vos biens sont surlignés en doré. « Meilleure revente » : l'île où ce bien vaut le plus selon vos informations (avec leur âge), et l'écart avec ici ${q('ecart')}.</p>`;
   const myo = E.playerOrders().filter(o => o.isl === isl);
   if (myo.length) {
-    h += `<h4>Vos ordres en attente ici</h4><table class="t"><tbody>` + myo.map(o => `<tr><td>${o.side === 'buy' ? 'Achat' : 'Vente'} ${esc(G[o.g].name)}</td><td class="n">${fmt(o.qty)} à ${fp(o.price)} §</td><td class="n"><button class="btn small" data-act="cancel" data-isl="${o.isl}" data-g="${o.g}" data-id="${o.id}">Annuler</button></td></tr>`).join('') + `</tbody></table>`;
+    h += `<h4>Vos offres en attente ici</h4><table class="t"><tbody>` + myo.map(o => `<tr><td>${o.side === 'buy' ? 'Achat' : 'Vente'} ${esc(G[o.g].name)}</td><td class="n">${fmt(o.qty)} à ${fp(o.price)} §</td><td class="n"><button class="btn small" data-act="cancel" data-isl="${o.isl}" data-g="${o.g}" data-id="${o.id}">Annuler</button></td></tr>`).join('') + `</tbody></table>`;
   }
   return h;
 }
+function pCompare() {
+  let h = `<h2>Toutes les îles ${q('comparer')}</h2><p class="sub">Où acheter, où revendre. Les prix des îles sans comptoir datent de vos dernières nouvelles.</p>`;
+  const ds = deals(10);
+  h += `<h4>Meilleures affaires connues</h4>`;
+  if (!ds.length) h += `<p class="note">Aucun écart rentable avec vos informations actuelles.</p>`;
+  else {
+    h += `<table class="t deals"><thead><tr><th>Bien</th><th>Acheter à</th><th>Revendre à</th><th class="n">Gain / unité</th><th class="n hide-m">Trajet</th></tr></thead><tbody>` + ds.map(d => `<tr class="row" data-act="goto-good" data-isl="${d.A}" data-g="${d.g}">
+      <td><b>${esc(G[d.g].name)}</b></td>
+      <td>${esc(SHORT[d.A])}${E.present(d.A) ? '' : '<span class="nocpt" title="pas de comptoir">°</span>'} <span class="muted">${fp(d.buy)} §</span></td>
+      <td>${esc(SHORT[d.B])}${E.present(d.B) ? '' : '<span class="nocpt" title="pas de comptoir">°</span>'} <span class="muted">≈ ${fp(d.sell)} §</span></td>
+      <td class="n nowrap"><b class="up">+${fp(d.gain)} §</b><br><span class="muted small">${Math.round(d.pc * 100)} %${d.delay ? ` · info de ${d.delay} j` : ''}</span></td><td class="n hide-m">${d.days} j</td></tr>`).join('') + `</tbody></table>
+      <p class="note">Gain estimé par unité, taxes et fret compris, si vous revendez en mettant en vente au cours de l'île d'arrivée. ° : vous n'avez pas de comptoir sur cette île (il en faut un pour y commercer). Touchez une ligne pour ouvrir le bien sur l'île d'achat.</p>`;
+  }
+  h += `<h4>Tous les prix</h4><div class="scrollx"><table class="t grid"><thead><tr><th>Bien</th>` + ISLANDS.map(i => { const d = E.infoDelay(i.id); return `<th class="n">${esc(SHORT[i.id])}<br><span class="age ${d ? '' : 'live'}">${d ? d + ' j' : 'direct'}</span></th>`; }).join('') + `</tr></thead><tbody>`;
+  let tier = -1;
+  GOODS.forEach(g => {
+    if (g.tier !== tier) { tier = g.tier; h += `<tr class="tier"><td colspan="8">${['Matières brutes', 'Produits transformés', 'Composants', 'Produits finis'][tier]}</td></tr>`; }
+    const vals = ISLANDS.map(i => { const k = known(i.id, g.id); return S().isl[i.id].banned[g.id] ? null : k ? k.p : null; });
+    const ok = vals.filter(v => v != null);
+    const lo = Math.min(...ok), hi = Math.max(...ok);
+    h += `<tr><td>${esc(g.name)}</td>` + ISLANDS.map((i, k) => {
+      const v = vals[k], mine = E.stockOf(PA(), i.id, g.id);
+      if (S().isl[i.id].banned[g.id]) return `<td class="n muted">interdit</td>`;
+      const cls = ok.length > 1 && v === lo ? 'lo' : ok.length > 1 && v === hi ? 'hi' : '';
+      return `<td class="n cell ${cls} ${mine ? 'own' : ''}" data-act="goto-good" data-isl="${i.id}" data-g="${g.id}">${fp(v)}</td>`;
+    }).join('') + `</tr>`;
+  });
+  h += `</tbody></table></div><p class="note"><span class="lo pill">vert</span> le moins cher · <span class="hi pill">rouge</span> le plus cher · <span class="own pill">doré</span> vous en avez sur cette île. Touchez un prix pour ouvrir la bourse de l'île.</p>`;
+  return h;
+}
+
+// ---------------------------------------------------------------- COMPTOIRS : tout ce que vous possédez
+function pEntrepots() {
+  const pl = P(), a = PA();
+  let stockVal = 0, seaVal = 0, ordVal = 0;
+  ISLANDS.forEach(i => { for (const g in a.stock[i.id]) stockVal += a.stock[i.id][g] * S().books[i.id][g].ema; });
+  const sea = S().shipments.filter(s => s.owner === 'player');
+  sea.forEach(s => { for (const g in s.cargo) seaVal += s.cargo[g] * S().books[s.from][g].ema; });
+  const orders = E.playerOrders();
+  orders.forEach(o => { ordVal += o.side === 'buy' ? o.qty * o.price : o.qty * S().books[o.isl][o.g].ema; });
+  const wages = pl.workshops.filter(w => w.on).reduce((t, w) => t + RECIPES[w.recipe].workers * w.level * S().isl[w.isl].wage, 0);
+  const esc_ = sea.filter(s => s.escort).length;
+  const fees = [
+    [`${pl.comptoirs.length} comptoir(s) × ${E.COSTS.comptoirDay} §`, pl.comptoirs.length * E.COSTS.comptoirDay],
+    [`${pl.ships.length} navire(s) × ${E.COSTS.shipDay} §`, pl.ships.length * E.COSTS.shipDay],
+    [`${pl.informants.length} informateur(s) × ${E.COSTS.informantDay} §`, pl.informants.length * E.COSTS.informantDay],
+    [`${esc_} escorte(s) en mer × ${E.COSTS.escortDay} §`, esc_ * E.COSTS.escortDay],
+    [`Salaires des ateliers (à pleine production)`, wages],
+  ];
+  const feeTot = fees.reduce((t, f) => t + f[1], 0);
+  let h = `<h2>Comptoirs et biens</h2><p class="sub">Tout ce que vous possédez, où que ce soit.</p>`;
+  h += `<div class="kpis"><div><span>Sceaux ${q('sceaux')}</span><b>${fmt(a.cash)} §</b></div><div><span>En entrepôt</span><b>${fmt(stockVal)} §</b></div><div><span>En mer</span><b>${fmt(seaVal)} §</b></div><div><span>Offres en attente</span><b>${fmt(ordVal)} §</b></div><div><span>Frais / jour</span><b class="down">−${fmt(feeTot)} §</b></div></div>`;
+  // stocks
+  const view = ui.stockView || 'bien';
+  h += `<h4>Stocks en entrepôt ${q('stock')}</h4><div class="seg small"><button class="${view === 'bien' ? 'on' : ''}" data-act="stockview" data-v="bien">Par bien</button><button class="${view === 'ile' ? 'on' : ''}" data-act="stockview" data-v="ile">Par île</button></div>`;
+  const byGood = {};
+  ISLANDS.forEach(i => { for (const g in a.stock[i.id]) (byGood[g] = byGood[g] || []).push([i.id, a.stock[i.id][g]]); });
+  if (!Object.keys(byGood).length) h += `<p class="note">Aucun stock. Achetez en bourse pour remplir vos entrepôts.</p>`;
+  else if (view === 'bien') {
+    h += `<table class="t"><thead><tr><th>Bien</th><th class="n">Total</th><th>Où</th><th class="n hide-m">Valeur</th><th>Meilleure revente</th></tr></thead><tbody>`;
+    GOODS.filter(g => byGood[g.id]).forEach(g => {
+      const list = byGood[g.id], tot = list.reduce((t, x) => t + x[1], 0);
+      const val = list.reduce((t, x) => t + x[1] * S().books[x[0]][g.id].ema, 0);
+      const main = list.slice().sort((x, y) => y[1] - x[1])[0][0];
+      const rs = bestResale(null, g.id);
+      h += `<tr><td><b>${esc(g.name)}</b>${G[g.id].perish >= 0.01 ? ' <span class="tag">périssable</span>' : ''}</td><td class="n"><b>${fmt(tot)}</b></td>
+        <td>${list.map(([i, qq]) => `<button class="chipbtn" data-act="goto-good" data-isl="${i}" data-g="${g.id}">${esc(SHORT[i])} ${fmt(qq)}</button>`).join(' ')}</td>
+        <td class="n hide-m">${fmt(val)} §</td><td>${rs ? `${esc(SHORT[rs.isl])} <b>${fp(rs.p)} §</b>${rs.delay ? ` <span class="age">${rs.delay} j</span>` : ''}` : '—'} <button class="btn small" data-act="ship-from" data-isl="${main}">Expédier</button></td></tr>`;
+    });
+    h += `</tbody></table>`;
+  } else {
+    ISLANDS.forEach(i => {
+      const st = a.stock[i.id], goods = Object.keys(st);
+      if (!goods.length) return;
+      let val = 0; goods.forEach(g => { val += st[g] * S().books[i.id][g].ema; });
+      h += `<div class="card ${E.present(i.id) ? 'hl' : ''}"><div class="row-flex" style="justify-content:space-between"><b>${esc(i.name)}</b><span class="muted">≈ ${fmt(val)} §</span></div>
+        <div class="chips">${goods.map(g => `<button class="chipbtn" data-act="goto-good" data-isl="${i.id}" data-g="${g}">${esc(G[g].name)} <b>${fmt(st[g])}</b></button>`).join('')}</div>
+        <div class="row-flex"><button class="btn small" data-act="goto" data-isl="${i.id}">Bourse</button><button class="btn small" data-act="ship-from" data-isl="${i.id}">Expédier</button></div></div>`;
+    });
+  }
+  // en mer
+  h += `<h4>Marchandises en mer (${sea.length})</h4>`;
+  if (!sea.length) h += `<p class="note">Aucun convoi en route.</p>`;
+  else h += `<table class="t"><tbody>` + sea.map(s => `<tr><td><b>${esc(SHORT[s.from])} → ${esc(SHORT[s.to])}</b><br><span class="note">${Object.keys(s.cargo).map(g => fmt(s.cargo[g]) + ' ' + gname(g)).join(', ') || 'à vide'}</span></td><td class="n">arrivée dans<br><b>${Math.max(0, (s.arr - S().hour) / 24).toFixed(1).replace('.', ',')} j</b></td></tr>`).join('') + `</tbody></table>`;
+  // offres
+  h += `<h4>Offres en attente (${orders.length}) ${q('limite')}</h4>`;
+  if (!orders.length) h += `<p class="note">Aucune offre en attente.</p>`;
+  else h += `<table class="t"><tbody>` + orders.map(o => `<tr><td>${o.side === 'buy' ? 'Achat' : 'Vente'} · <b>${esc(G[o.g].name)}</b><br><span class="note">${esc(I[o.isl].name)}</span></td><td class="n">${fmt(o.qty)} à ${fp(o.price)} §</td><td class="n"><button class="btn small" data-act="cancel" data-isl="${o.isl}" data-g="${o.g}" data-id="${o.id}">Annuler</button></td></tr>`).join('') + `</tbody></table>`;
+  // frais
+  h += `<h4>Frais quotidiens</h4><table class="t"><tbody>` + fees.filter(f => f[1] > 0).map(f => `<tr><td>${f[0]}</td><td class="n">${fmt(f[1])} §</td></tr>`).join('') + `<tr><td><b>Total</b></td><td class="n"><b>${fmt(feeTot)} §</b></td></tr></tbody></table>`;
+  // réseau
+  h += `<h4>Comptoirs et réseau d'information ${q('nouvelles')}</h4>`;
+  h += `<table class="t"><thead><tr><th>Île</th><th>Présence</th><th class="n">Retard</th><th></th></tr></thead><tbody>` + ISLANDS.map(i => {
+    const pres = E.present(i.id), inf = pl.informants.includes(i.id);
+    return `<tr><td>${esc(i.name)}</td><td>${pres ? '<b>Comptoir</b>' : inf ? 'Informateur' : '—'}</td><td class="n">${E.infoDelay(i.id)} j</td><td class="n">
+      ${!pres ? `<button class="btn small" data-act="open-cpt" data-isl="${i.id}">Comptoir ${E.COSTS.comptoir} §</button>` : i.id !== 'port' ? `<button class="btn small" data-act="close-cpt" data-isl="${i.id}">Fermer</button>` : ''}
+      ${!pres && !inf && pl.unlocked[2] ? `<button class="btn small" data-act="hire-inf" data-isl="${i.id}">Informateur ${E.COSTS.informant} §</button>` : ''}
+      ${inf ? `<button class="btn small" data-act="fire-inf" data-isl="${i.id}">Congédier</button>` : ''}</td></tr>`;
+  }).join('') + `</tbody></table>`;
+  if (pl.unlocked[2] && !pl.colombier) h += `<div class="row-flex" style="margin-top:8px"><button class="btn" data-act="colombier">Bâtir un colombier (${fmt(E.COSTS.colombier)} §)</button>${q('colombier')}</div>`;
+  if (pl.colombier) h += `<p class="note">Votre colombier est en service.</p>`;
+  if (!pl.unlocked[2]) h += `<p class="note">Informateurs et colombier s'ouvrent au stade Négociant. Un colporteur ne peut tenir que 2 comptoirs.</p>`;
+  h += `<h4>Votre fortune ${q('fortune')}</h4>` + chart(S().netHist, { color: '#4d6a37', n: 360 });
+  return h;
+}
+
+// ---------------------------------------------------------------- NAVIGATION
+function pNavigation() {
+  const pl = P(), a = PA(), f = ui.form;
+  const origins = ISLANDS.filter(i => Object.keys(a.stock[i.id]).length || pl.ships.some(s => s.at === i.id && s.status === 'idle')).map(i => i.id);
+  if (!f.from || !origins.includes(f.from)) f.from = origins[0] || null;
+  const dests = pl.comptoirs.filter(x => x !== f.from);
+  if (!f.to || !dests.includes(f.to)) f.to = dests[0] || null;
+  let h = `<h2>Navigation</h2><p class="sub">Expédiez vos marchandises vers une île où vous avez un comptoir.</p>`;
+  if (!f.from) h += `<div class="card"><p class="note">Vous n'avez de stock nulle part. Achetez d'abord en bourse.</p></div>`;
+  else if (!f.to) h += `<div class="card"><p class="note">Il vous faut un comptoir sur une autre île pour y recevoir des marchandises.</p><button class="btn small" data-act="tab" data-tab="entrepots">Ouvrir un comptoir</button></div>`;
+  else {
+    const st = a.stock[f.from];
+    let total = 0; const loaded = [];
+    Object.keys(st).forEach(g => { const qq = Math.min(+f.cargo[g] || 0, st[g]); if (qq > 0) { total += qq; loaded.push([g, qq]); } });
+    // 1. chargement
+    h += `<div class="step"><div class="sh"><span class="stepn">1</span><b>Départ et chargement</b></div>
+      <label class="field">Port de départ<select data-bind="from">${islOptions(f.from, x => origins.includes(x))}</select></label>
+      <table class="t" style="margin-top:6px"><thead><tr><th>Bien</th><th class="n">En stock</th><th class="n">À charger</th></tr></thead><tbody>`;
+    Object.keys(st).forEach(g => {
+      h += `<tr class="${+f.cargo[g] > 0 ? 'own' : ''}"><td>${esc(G[g].name)}${G[g].perish >= 0.01 ? ' <span class="tag">périssable</span>' : ''}</td><td class="n">${fmt(st[g])}</td>
+        <td class="n"><input class="num" type="number" min="0" max="${st[g]}" data-bind="cargo.${g}" value="${f.cargo[g] || ''}"> <button class="btn small" data-act="cargo-all" data-g="${g}" data-v="${st[g]}">tout</button></td></tr>`;
+    });
+    h += `</tbody></table></div>`;
+    // 2. destination
+    h += `<div class="step"><div class="sh"><span class="stepn">2</span><b>Destination</b> ${q('risques')}</div><table class="t dest"><thead><tr><th></th><th>Île</th><th class="n">Trajet</th><th>Risques</th><th class="n">${loaded.length ? 'Revente estimée' : 'Prix connus'}</th></tr></thead><tbody>`;
+    dests.forEach(d => {
+      const pth = E.PATH[f.from][d], dst = S().isl[d];
+      const emb = E.embargoed(f.from, d);
+      let rev = 0, cost = 0, warn = [];
+      loaded.forEach(([g, qq]) => {
+        const k = known(d, g); if (dst.banned[g]) warn.push(`${gname(g)} interdit`); else if (dst.tariffs[g]) warn.push(`droits sur ${gname(g)}`);
+        if (k) rev += qq * k.p * 0.97 * (1 - dst.tax); cost += qq * S().books[f.from][g].ema;
+      });
+      const risk = [pth.danger > 0.4 ? '<span class="down">pirates</span>' : pth.danger > 0.15 ? 'pirates modérés' : 'calme', E.seasonIdx() === 2 ? '<span class="down">tempêtes</span>' : ''].filter(Boolean).join(', ');
+      h += `<tr class="row ${f.to === d ? 'sel' : ''}" data-act="set-dest" data-v="${d}"><td><input type="radio" ${f.to === d ? 'checked' : ''} ${emb ? 'disabled' : ''}></td><td><b>${esc(I[d].name)}</b>${emb ? ' <span class="tag">embargo</span>' : ''}${warn.length ? `<br><span class="note down">${esc(warn.join(', '))}</span>` : ''}</td>
+        <td class="n">${pth.days} j</td><td>${risk}</td><td class="n">${loaded.length ? `<b>${fmt(rev)} §</b> <span class="${rev > cost ? 'up' : 'down'}">${cost ? (rev >= cost ? '+' : '−') + Math.round(Math.abs(rev / cost - 1) * 100) + ' %' : ''}</span>` : '<span class="muted">chargez d\'abord</span>'}${E.infoDelay(d) ? ` <span class="age">${E.infoDelay(d)} j</span>` : ''}</td></tr>`;
+    });
+    h += `</tbody></table><p class="note">Revente estimée : ce que rapporterait votre chargement mis en vente au cours connu de l'île, comparé à sa valeur ici.</p></div>`;
+    // 3. transport
+    const pth = E.PATH[f.from][f.to];
+    const idle = pl.ships.filter(s => s.at === f.from && s.status === 'idle');
+    if (f.mode === 'navire' && !idle.length) f.mode = 'fret';
+    if (f.mode === 'navire' && !idle.some(s => s.id === +f.shipId)) f.shipId = idle[0].id;
+    const cost = f.mode === 'fret' ? Math.ceil(total * E.freightCost(pth.days)) : 0;
+    h += `<div class="step"><div class="sh"><span class="stepn">3</span><b>Transport</b></div>
+      <div class="row-flex" style="margin:2px 0 6px"><label><input type="radio" name="mode" data-bind="mode" value="fret" ${f.mode === 'fret' ? 'checked' : ''}> Fret, ${fp(E.freightCost(pth.days))} § par unité</label>${q('fret')}
+      <label><input type="radio" name="mode" data-bind="mode" value="navire" ${f.mode === 'navire' ? 'checked' : ''} ${idle.length ? '' : 'disabled'}> Mon navire ${idle.length ? '' : '(aucun à quai ici)'}</label>${q('navire')}</div>`;
+    if (f.mode === 'navire') h += `<div class="row-flex"><select data-bind="shipId">${idle.map(s => `<option value="${s.id}" ${+f.shipId === s.id ? 'selected' : ''}>${esc(s.name)} (${s.cap} places)</option>`).join('')}</select>
+        <label><input type="checkbox" data-bind="escort" ${f.escort ? 'checked' : ''}> Escorte (${E.COSTS.escortDay} §/j)</label>${q('escorte')}
+        <label><input type="checkbox" data-bind="smuggle" ${f.smuggle ? 'checked' : ''}> Contrebande</label>${q('contrebande')}</div>`;
+    h += `<div class="recap"><div><span>Chargement</span><b>${fmt(total)} unités</b></div><div><span>Vers</span><b>${esc(I[f.to].name)}</b></div><div><span>Durée</span><b>≈ ${pth.days} j</b></div><div><span>Coût</span><b>${f.mode === 'fret' ? fmt(cost) + ' §' : 'entretien' + (f.escort ? ' + escorte' : '')}</b></div></div>`;
+    if (cost > a.cash) h += `<p class="warn-box">Il vous manque ${fmt(cost - a.cash)} § pour payer le fret. Avec vos ${fmt(a.cash)} §, vous pouvez expédier au plus ${fmt(Math.floor(a.cash / E.freightCost(pth.days)))} unités.</p>`;
+    h += `<button class="btn primary wide" data-act="ship" ${(total || f.mode === 'navire') && cost <= a.cash && !E.embargoed(f.from, f.to) ? '' : 'disabled'}>Expédier ${fmt(total)} unités vers ${esc(I[f.to].name)}</button></div>`;
+  }
+  const mine = S().shipments.filter(s => s.owner === 'player');
+  h += `<h4>En mer (${mine.length})</h4>`;
+  if (!mine.length) h += `<p class="note">Aucun convoi en route.</p>`;
+  mine.forEach(sh => {
+    const p = Math.min(1, (S().hour - sh.dep) / (sh.arr - sh.dep));
+    const ship = sh.shipId ? pl.ships.find(s => s.id === sh.shipId) : null;
+    h += `<div class="card"><div class="row-flex" style="justify-content:space-between"><b>${esc(I[sh.from].name)} → ${esc(I[sh.to].name)}</b><span class="muted">arrivée dans <b>${Math.max(0, (sh.arr - S().hour) / 24).toFixed(1).replace('.', ',')} j</b></span></div>
+      ${bar(p, ' ')}<div class="chips">${Object.keys(sh.cargo).map(g => `<span class="chip">${esc(G[g].name)} : ${fmt(sh.cargo[g])}</span>`).join('') || '<span class="chip">à vide</span>'}<span class="chip">${ship ? esc(ship.name) : 'fret'}${sh.escort ? ' · escorte' : ''}${sh.smuggle ? ' · contrebande' : ''}</span></div></div>`;
+  });
+  h += `<h4>Votre flotte ${q('navire')}</h4>`;
+  if (!pl.unlocked[2]) h += `<p class="note">Posséder des navires demande le stade Négociant (5 000 § de valeur nette).</p>`;
+  else {
+    if (!pl.ships.length) h += `<p class="note">Aucun navire.</p>`;
+    pl.ships.forEach(s => {
+      h += `<div class="card row-flex" style="justify-content:space-between"><span><b>${esc(s.name)}</b> · ${s.cap} places · ${s.status === 'idle' ? 'à quai à ' + esc(I[s.at].name) : 'en mer'}</span>
+        <span class="row-flex">${s.status === 'idle' ? `<select data-bind="moveTo.${s.id}">${islOptions(ui.form['moveTo.' + s.id] || 'port', x => x !== s.at)}</select><button class="btn small" data-act="move-ship" data-id="${s.id}">Envoyer à vide</button><button class="btn small" data-act="sell-ship" data-id="${s.id}">Vendre 1 500 §</button>` : ''}</span></div>`;
+    });
+    const isl = ui.sel;
+    h += `<div class="row-flex"><button class="btn" data-act="buy-ship" data-isl="${isl}" ${E.present(isl) ? '' : 'disabled'}>Acheter un navire à ${esc(I[isl].name)} (${fmt(isl === 'bois' ? E.COSTS.ship : E.COSTS.shipFar)} §)</button><span class="note">Moins cher à Boisnoir. Entretien ${E.COSTS.shipDay} §/j.</span></div>`;
+  }
+  return h;
+}
+
 function maxBuyQty(isl, g) {
   const st = S().isl[isl]; let cash = PA().cash, n = 0;
   for (const o of S().books[isl][g].asks) { if (o.a === 'player') continue; const c = o.price * (1 + st.tax); const k = Math.min(o.qty, Math.floor(cash / c)); n += k; cash -= k * c; if (k < o.qty) break; }
@@ -543,6 +904,38 @@ function listSummary(isl, g) {
   return { q, p, label: `Mettre en vente ${fmt(q)} à ${fp(p)} §`,
     html: `<p class="note">${pos} Ici, il s'en échange environ ${fmt(vol)} par jour : comptez ${q <= vol ? 'quelques heures' : 'environ ' + Math.ceil(q / vol) + ' jours'} pour tout vendre. Rapport attendu : ${fmt(q * p * (1 - S().isl[isl].tax))} § après taxe. Vous pourrez annuler l'offre.</p>` };
 }
+// confirmation de chaque achat et vente
+function confirmTrade(kind, g) {
+  const isl = ui.sel, f = ui.form, st = S().isl[isl], cash = PA().cash;
+  let title, rows, run;
+  if (kind === 'buy') {
+    const r = tradeSummary(isl, g, 'buy'); if (!r.ok) return toast('Achat impossible pour le moment.', true);
+    const w = walkBook(isl, g, 'buy', r.q), tot = w.cost * (1 + st.tax);
+    title = `Acheter ${fmt(r.q)} ${gname(g)} ?`;
+    rows = [['Île', I[isl].name], ['Prix moyen', fp(w.avg) + ' § l\'unité'], ['Taxe de bourse', fmt(w.cost * st.tax) + ' §'], ['Total', '<b>' + fmt(tot) + ' §</b>'], ['Il vous restera', fmt(cash - tot) + ' §']];
+    run = () => act(E.A.buyMarket(isl, g, r.q));
+  } else if (kind === 'sell') {
+    const r = tradeSummary(isl, g, 'sell'); if (!r.ok) return toast('Aucun acheteur pour le moment.', true);
+    const w = walkBook(isl, g, 'sell', r.q), got = w.cost * (1 - st.tax);
+    title = `Vendre ${fmt(Math.min(r.q, w.filled))} ${gname(g)} tout de suite ?`;
+    rows = [['Île', I[isl].name], ['Prix moyen', fp(w.avg) + ' § l\'unité'], ['Taxe de bourse', fmt(w.cost * st.tax) + ' §'], ['Vous touchez', '<b>' + fmt(got) + ' §</b>']];
+    run = () => { const res = E.A.sellMarket(isl, g, r.q); if (res.ok) tuto().sold = true; f.sq = null; act(res); };
+  } else if (kind === 'list') {
+    const l = listSummary(isl, g);
+    title = `Mettre en vente ${fmt(l.q)} ${gname(g)} ?`;
+    rows = [['Île', I[isl].name], ['Prix demandé', fp(l.p) + ' § l\'unité'], ['Rapport attendu', '<b>' + fmt(l.q * l.p * (1 - st.tax)) + ' §</b> après taxe'], ['Durée', 'jusqu\'à 30 jours, annulable']];
+    run = () => { const res = E.A.limit(isl, g, 'sell', l.p, l.q); if (res.ok) { tuto().sold = true; f.sq = null; f.sp = ''; } act(res); };
+  } else {
+    const side = kind.slice(6), p = readInt(f.price) || S().books[isl][g].ema, qq = Math.floor(readInt(f.qty));
+    if (!(qq > 0)) return toast('Indiquez une quantité.', true);
+    title = side === 'buy' ? `Proposer d'acheter ${fmt(qq)} ${gname(g)} ?` : `Proposer de vendre ${fmt(qq)} ${gname(g)} ?`;
+    rows = [['Île', I[isl].name], ['Votre prix', fp(p) + ' § l\'unité'], [side === 'buy' ? 'Argent bloqué' : 'Valeur', fmt(p * qq * (side === 'buy' ? 1 + st.tax : 1)) + ' §'], ['Durée', 'jusqu\'à 30 jours, annulable']];
+    run = () => act(E.A.limit(isl, g, side, p, qq));
+  }
+  ui.pending = run;
+  openModal(`<div class="kicker">Confirmation</div><h1>${title}</h1><div class="kv confirm">${rows.map(r => `<span>${r[0]}</span><b>${r[1]}</b>`).join('')}</div>
+    <div class="actions"><button class="btn" data-act="close">Annuler</button><button class="btn primary" data-act="do-trade">Confirmer</button></div>`);
+}
 function updateTrade() {
   const box = document.querySelector('.trade2'); if (!box) return;
   const isl = ui.sel, g = ui.good;
@@ -586,6 +979,7 @@ function pDetail(isl, g, pres, info) {
   let h = `<div class="detail" id="detail"><button class="btn small close" data-act="sel-good" data-g="">Fermer</button>
     <h3 class="dtitle">${esc(G[g].name)} <span>à ${esc(I[isl].name)}</span></h3>
     <p class="lead">Prix ${pres ? 'actuel' : `il y a ${info.delay} j`} : <b>${fp(now)} §</b> · ${Math.abs(trend) < 0.01 ? 'stable' : trend > 0 ? `<span class="up">en hausse de ${pct(trend).slice(1)}</span>` : `<span class="down">en baisse de ${pct(trend).slice(1)}</span>`} sur 5 jours · prix de base ${fp(G[g].base)} §${G[g].perish >= 0.01 ? ` · <span class="down">se gâte vite</span> ${q('perissable')}` : ''}</p>`;
+  h += `<div class="jump"><span class="note">Ce bien ailleurs :</span>${ISLANDS.map(z => { const k = known(z.id, g); return `<button class="chipbtn ${z.id === isl ? 'on' : ''}" data-act="goto-good" data-isl="${z.id}" data-g="${g}">${esc(SHORT[z.id])} <b>${S().isl[z.id].banned[g] ? '✕' : k ? fp(k.p) : '?'}</b></button>`; }).join('')}</div>`;
   h += chart(hist, { base: G[g].base, h: 100, label: pres ? "aujourd'hui" : `il y a ${info.delay} j` });
   if (st.banned[g]) {
     const have = E.stockOf(PA(), isl, g);
@@ -603,10 +997,10 @@ function pDetail(isl, g, pres, info) {
       <button class="btn primary big" id="btn-buy" data-act="buy" data-g="${g}" ${buy.ok ? '' : 'disabled'}>${buy.label}</button></div>
     <div class="tcard tsell"><h5>Vendre ${q('vendez')}</h5>
       ${have ? qtyCtl('sq', have) + `
-      <div class="opt"><b>Tout de suite</b>, aux acheteurs présents ${bid ? `(jusqu'à ${fp(bid.price)} § l'unité)` : ''}
+      <div class="opt"><div><b>Tout de suite</b>, aux acheteurs présents ${bid ? `(jusqu'à ${fp(bid.price)} § l'unité)` : ''}</div>
         <div id="sum-sell">${sell.html}</div>
         <button class="btn primary" id="btn-sell" data-act="sell" data-g="${g}" ${sell.ok ? '' : 'disabled'}>${sell.label}</button></div>
-      <div class="opt"><b>Mettre en vente</b> et laisser venir les clients ${q('limite')}
+      <div class="opt"><div><b>Mettre en vente</b> et laisser venir les clients ${q('limite')}</div>
         <div class="row-flex" style="margin:4px 0">au prix de <input class="num" type="number" step="0.1" min="0.01" data-bind="sp" value="${esc(ui.form.sp || listPrice(isl, g))}"> § l'unité</div>
         <div id="sum-list">${listSummary(isl, g).html}</div>
         <button class="btn primary" id="btn-list" data-act="list" data-g="${g}">${listSummary(isl, g).label}</button></div>` : `<div id="sum-sell">${sell.html}</div>`}
@@ -622,110 +1016,6 @@ function pDetail(isl, g, pres, info) {
     <div class="ob"><div><b style="font-size:13px">Ils vendent (vous achetez à)</b><table class="asks">${b.asks.slice(0, 8).map(row).join('') || '<tr><td class="muted">personne</td></tr>'}</table></div>
     <div><b style="font-size:13px">Ils achètent (vous vendez à)</b><table class="bids">${b.bids.slice(0, 8).map(row).join('') || '<tr><td class="muted">personne</td></tr>'}</table></div></div></details>`;
   return h + `</div>`;
-}
-
-// ---------------------------------------------------------------- COMPTOIRS & ENTREPÔTS
-function pEntrepots() {
-  const pl = P(), a = PA();
-  let h = `<h2>Comptoirs et entrepôts</h2><p class="sub">Un comptoir vous donne la bourse en direct et un entrepôt sur l'île. Vos frais fixes : <b>${fmt(pl.lastUpkeep || 0)} §/jour</b>.</p>`;
-  h += `<h4>Votre fortune ${q('fortune')}</h4>` + chart(S().netHist, { color: '#4d6a37', n: 360 });
-  h += `<h4>Entrepôts ${q('stock')}</h4>`;
-  let any = false;
-  ISLANDS.forEach(i => {
-    const st = a.stock[i.id], goods = Object.keys(st);
-    const pres = E.present(i.id);
-    if (!goods.length && !pres) return;
-    any = true;
-    let val = 0; goods.forEach(g => { val += st[g] * S().books[i.id][g].ema; });
-    h += `<div class="card ${pres ? 'hl' : ''}"><div class="row-flex" style="justify-content:space-between"><b>${esc(i.name)}</b>
-      <span class="row-flex">${pres ? '<span class="chip green">comptoir</span>' : '<span class="chip">pas de comptoir</span>'}${goods.length ? `<span class="muted">valeur ≈ ${fmt(val)} §</span>` : ''}
-      <button class="btn small" data-act="goto" data-isl="${i.id}">Bourse</button>
-      ${goods.length ? `<button class="btn small" data-act="ship-from" data-isl="${i.id}">Expédier</button>` : ''}
-      ${pres && i.id !== 'port' ? `<button class="btn small" data-act="close-cpt" data-isl="${i.id}">Fermer</button>` : ''}</span></div>`;
-    if (goods.length) h += `<div class="chips">` + goods.map(g => `<span class="chip">${esc(G[g].name)} : <b>${fmt(st[g])}</b>${G[g].perish >= 0.01 ? ' <span class="down">périssable</span>' : ''}${S().isl[i.id].banned[g] ? ' <span class="down">illicite</span>' : ''}</span>`).join('') + `</div>`;
-    else h += `<p class="note">Entrepôt vide.</p>`;
-    h += `</div>`;
-  });
-  if (!any) h += `<p class="note">Aucun stock.</p>`;
-  h += `<h4>Réseau d'information ${q('nouvelles')}</h4><p class="note">Sans comptoir, les nouvelles d'une île vous arrivent avec le retard des navires. Un informateur réduit ce retard à 1 jour ; un colombier le divise par deux partout.</p>`;
-  h += `<table class="t"><thead><tr><th>Île</th><th>Présence</th><th class="n">Retard</th><th></th></tr></thead><tbody>` + ISLANDS.map(i => {
-    const pres = E.present(i.id), inf = pl.informants.includes(i.id);
-    return `<tr><td>${esc(i.name)}</td><td>${pres ? 'Comptoir' : inf ? 'Informateur' : '—'}</td><td class="n">${E.infoDelay(i.id)} j</td><td class="n">
-      ${!pres ? `<button class="btn small" data-act="open-cpt" data-isl="${i.id}">Comptoir ${E.COSTS.comptoir} §</button>` : ''}
-      ${!pres && !inf && pl.unlocked[2] ? `<button class="btn small" data-act="hire-inf" data-isl="${i.id}">Informateur ${E.COSTS.informant} §</button> ${q('informateur')}` : ''}
-      ${inf ? `<button class="btn small" data-act="fire-inf" data-isl="${i.id}">Congédier</button>` : ''}</td></tr>`;
-  }).join('') + `</tbody></table>`;
-  if (pl.unlocked[2] && !pl.colombier) h += `<div class="row-flex" style="margin-top:8px"><button class="btn" data-act="colombier">Bâtir un colombier (${fmt(E.COSTS.colombier)} §)</button>${q('colombier')}</div>`;
-  if (pl.colombier) h += `<p class="note">Votre colombier est en service.</p>`;
-  if (!pl.unlocked[2]) h += `<p class="note">Informateurs et colombier s'ouvrent au stade Négociant. Un colporteur ne peut tenir que 2 comptoirs.</p>`;
-  return h;
-}
-
-// ---------------------------------------------------------------- NAVIGATION
-function pNavigation() {
-  const pl = P(), a = PA(), f = ui.form;
-  const origins = ISLANDS.filter(i => Object.keys(a.stock[i.id]).length || pl.ships.some(s => s.at === i.id && s.status === 'idle')).map(i => i.id);
-  if (!f.from || !origins.includes(f.from)) f.from = origins[0] || null;
-  const dests = pl.comptoirs.filter(x => x !== f.from);
-  if (!f.to || !dests.includes(f.to)) f.to = dests[0] || null;
-  let h = `<h2>Navigation</h2><p class="sub">Les marchandises voyagent par mer. Le fret est simple ; un navire à vous permet l'escorte et la contrebande.</p>`;
-  h += `<h4>Nouvelle expédition</h4>`;
-  if (!f.from) h += `<p class="note">Vous n'avez de stock nulle part. Achetez d'abord en bourse.</p>`;
-  else if (!f.to) h += `<p class="note">Il vous faut un comptoir sur une autre île pour y recevoir des marchandises.</p>`;
-  else {
-    const pth = E.PATH[f.from][f.to];
-    const idle = pl.ships.filter(s => s.at === f.from && s.status === 'idle');
-    if (f.mode === 'navire' && !idle.length) f.mode = 'fret';
-    if (f.mode === 'navire' && !idle.some(s => s.id === +f.shipId)) f.shipId = idle[0].id;
-    h += `<div class="grid2"><label class="field">Départ<select data-bind="from">${islOptions(f.from, x => origins.includes(x))}</select></label>
-      <label class="field">Destination (vos comptoirs)<select data-bind="to">${islOptions(f.to, x => dests.includes(x))}</select></label></div>
-      <div class="chips" style="margin-top:8px"><span class="chip">${pth.days} j de mer (plus avec la brume)</span><span class="chip ${pth.danger > 0.4 ? 'red' : ''}">Pirates : ${pth.danger > 0.4 ? 'élevé' : pth.danger > 0.15 ? 'modéré' : 'faible'} ${q('risques')}</span>
-      ${E.seasonIdx() === 2 ? '<span class="chip red">Saison des tempêtes</span>' : ''}${E.embargoed(f.from, f.to) ? '<span class="chip red">Embargo</span>' : ''}</div>
-      <div class="row-flex" style="margin:4px 0 8px"><label><input type="radio" name="mode" data-bind="mode" value="fret" ${f.mode === 'fret' ? 'checked' : ''}> Fret (${fp(E.freightCost(pth.days))} §/unité)</label>${q('fret')}
-      <label><input type="radio" name="mode" data-bind="mode" value="navire" ${f.mode === 'navire' ? 'checked' : ''} ${idle.length ? '' : 'disabled'}> Mon navire ${idle.length ? '' : '(aucun ici)'}</label>${q('navire')}</div>`;
-    if (f.mode === 'navire') {
-      h += `<div class="row-flex"><select data-bind="shipId">${idle.map(s => `<option value="${s.id}" ${+f.shipId === s.id ? 'selected' : ''}>${esc(s.name)} (${s.cap} places)</option>`).join('')}</select>
-        <label><input type="checkbox" data-bind="escort" ${f.escort ? 'checked' : ''}> Escorte (${E.COSTS.escortDay} §/j)</label>${q('escorte')}
-        <label title="Débarquer sans passer la douane : pas de droits, mais risque de fouille"><input type="checkbox" data-bind="smuggle" ${f.smuggle ? 'checked' : ''}> Contrebande</label>${q('contrebande')}</div>`;
-    }
-    const st = a.stock[f.from], dst = S().isl[f.to];
-    let total = 0;
-    h += `<table class="t" style="margin-top:8px"><thead><tr><th>Bien</th><th class="n">En stock</th><th class="n">Ici</th><th class="n">Là-bas*</th><th class="n">À charger</th></tr></thead><tbody>`;
-    Object.keys(st).forEach(g => {
-      const q = Math.min(+f.cargo[g] || 0, st[g]); total += q;
-      const there = E.knownSnap(f.to); const tp = there.live ? S().books[f.to][g].ema : (there.snap ? there.snap.p[g][0] : null);
-      const warn = dst.banned[g] ? ' <span class="down">interdit</span>' : dst.tariffs[g] ? ' <span class="down">droits 15 %</span>' : '';
-      h += `<tr><td>${esc(G[g].name)}${warn}</td><td class="n">${fmt(st[g])}</td><td class="n">${fp(S().books[f.from][g].ema)}</td><td class="n">${fp(tp)}</td>
-        <td class="n"><input class="num" type="number" min="0" max="${st[g]}" data-bind="cargo.${g}" value="${f.cargo[g] || ''}"> <button class="btn small" data-act="cargo-all" data-g="${g}" data-v="${st[g]}">tout</button></td></tr>`;
-    });
-    h += `</tbody></table><p class="note">* prix connus à destination, avec le retard de vos nouvelles.</p>`;
-    const cost = f.mode === 'fret' ? Math.ceil(total * E.freightCost(pth.days)) : 0;
-    if (cost > PA().cash) h += `<p class="warn-box">Il vous manque ${fmt(cost - PA().cash)} § pour payer le fret. Avec vos ${fmt(PA().cash)} §, vous pouvez expédier au plus ${fmt(Math.floor(PA().cash / E.freightCost(pth.days)))} unités. Vendez un peu de stock ou réduisez la quantité.</p>`;
-    h += `<div class="row-flex" style="margin-top:6px"><button class="btn primary" data-act="ship" ${(total || f.mode === 'navire') && cost <= PA().cash ? '' : 'disabled'}>Expédier ${fmt(total)} unités</button><span class="note">${f.mode === 'fret' ? `Coût du fret : ${fmt(cost)} §` : 'Frais : entretien du navire' + (f.escort ? ' et escorte' : '')}</span></div>`;
-  }
-  // en mer
-  const mine = S().shipments.filter(s => s.owner === 'player');
-  h += `<h4>En mer (${mine.length})</h4>`;
-  if (!mine.length) h += `<p class="note">Aucun convoi en route.</p>`;
-  mine.forEach(sh => {
-    const p = Math.min(1, (S().hour - sh.dep) / (sh.arr - sh.dep));
-    const ship = sh.shipId ? pl.ships.find(s => s.id === sh.shipId) : null;
-    h += `<div class="card"><div class="row-flex" style="justify-content:space-between"><b>${esc(I[sh.from].name)} → ${esc(I[sh.to].name)}</b><span class="muted">${ship ? esc(ship.name) : 'fret'}${sh.escort ? ' · escorte' : ''}${sh.smuggle ? ' · contrebande' : ''} · arrivée dans ${Math.max(0, (sh.arr - S().hour) / 24).toFixed(1).replace('.', ',')} j</span></div>
-      ${bar(p, ' ')}<div class="chips">${Object.keys(sh.cargo).map(g => `<span class="chip">${esc(G[g].name)} : ${fmt(sh.cargo[g])}</span>`).join('') || '<span class="chip">à vide</span>'}</div></div>`;
-  });
-  // flotte
-  h += `<h4>Votre flotte ${q('navire')}</h4>`;
-  if (!pl.unlocked[2]) h += `<p class="note">Posséder des navires demande le stade Négociant (5 000 § de valeur nette).</p>`;
-  else {
-    if (!pl.ships.length) h += `<p class="note">Aucun navire.</p>`;
-    pl.ships.forEach(s => {
-      h += `<div class="card row-flex" style="justify-content:space-between"><span><b>${esc(s.name)}</b> · ${s.cap} places · ${s.status === 'idle' ? 'à quai à ' + esc(I[s.at].name) : 'en mer'}</span>
-        <span class="row-flex">${s.status === 'idle' ? `<select data-bind="moveTo.${s.id}">${islOptions(ui.form['moveTo.' + s.id] || 'port', x => x !== s.at)}</select><button class="btn small" data-act="move-ship" data-id="${s.id}">Envoyer à vide</button><button class="btn small" data-act="sell-ship" data-id="${s.id}">Vendre 1 500 §</button>` : ''}</span></div>`;
-    });
-    const isl = ui.sel;
-    h += `<div class="row-flex"><button class="btn" data-act="buy-ship" data-isl="${isl}" ${E.present(isl) ? '' : 'disabled'}>Acheter un navire à ${esc(I[isl].name)} (${fmt(isl === 'bois' ? E.COSTS.ship : E.COSTS.shipFar)} §)</button><span class="note">Moins cher à Boisnoir. Entretien ${E.COSTS.shipDay} §/j.</span></div>`;
-  }
-  return h;
 }
 
 // ---------------------------------------------------------------- ATELIERS
@@ -799,98 +1089,118 @@ function pOptions() {
 
 // ---------------------------------------------------------------- INFLUENCE
 function pInfluence() {
-  const pl = P();
+  const pl = P(), gd = E.gday();
   let h = `<h2>Influence</h2><p class="sub">Réputation, contrats et faveurs : la seconde monnaie de l'archipel.</p>`;
-  h += `<div class="grid2"><div><div class="row-flex" style="justify-content:space-between"><b>Fiabilité ${q('fiabilite')}</b><span>${Math.round(pl.fiabilite)}</span></div>${bar(pl.fiabilite / 100)}<p class="note">Contrats honorés ou non.</p></div>
-    <div><div class="row-flex" style="justify-content:space-between"><b>Probité ${q('probite')}</b><span>${Math.round(pl.probite)}</span></div>${bar(pl.probite / 100)}<p class="note">Baisse avec les coups tordus.</p></div>
-    <div><div class="row-flex" style="justify-content:space-between"><b>Prestige ${q('prestige')}</b><span>${E.prestige()}</span></div>${bar(E.prestige() / 100, ' ')}<p class="note">Fortune et hauts faits. 50 pour devenir Notable.</p></div>
-    <div><b>Suspicion des autorités ${q('suspicion')}</b>${ISLANDS.filter(i => S().isl[i.id].suspicion > 1).map(i => `<div class="row-flex" style="justify-content:space-between;font-size:13px"><span>${esc(i.name)}</span><span>${Math.round(S().isl[i.id].suspicion)}</span></div>${bar(S().isl[i.id].suspicion / 100, S().isl[i.id].suspicion > 60 ? 'bad' : 'warn')}`).join('') || '<p class="note">Personne ne vous soupçonne.</p>'}</div></div>`;
+  const susp = ISLANDS.filter(i => S().isl[i.id].suspicion > 1).sort((x, y) => S().isl[y.id].suspicion - S().isl[x.id].suspicion);
+  h += `<div class="kpis"><div><span>Fiabilité ${q('fiabilite')}</span><b>${Math.round(pl.fiabilite)}</b>${bar(pl.fiabilite / 100)}</div><div><span>Probité ${q('probite')}</span><b>${Math.round(pl.probite)}</b>${bar(pl.probite / 100)}</div><div><span>Prestige ${q('prestige')}</span><b>${E.prestige()}</b>${bar(E.prestige() / 100, ' ')}</div>
+    <div><span>Suspicion ${q('suspicion')}</span><b>${susp.length ? Math.round(S().isl[susp[0].id].suspicion) : 0}</b><span class="note">${susp.length ? esc(susp[0].name) : 'personne'}</span></div></div>`;
   // contrats
+  const cs = S().contracts.filter(c => c.status !== 'expiré').sort((a, b) => ({ actif: 0, offre: 1, livré: 2, échoué: 3 })[a.status] - ({ actif: 0, offre: 1, livré: 2, échoué: 3 })[b.status] || a.deadline - b.deadline);
   h += `<h4>Contrats ${q('contrats')}</h4>`;
-  if (!pl.unlocked[2]) h += `<p class="note">Les PNJ vous proposeront des contrats quand vous serez Négociant.</p>`;
-  const cs = S().contracts.filter(c => c.status !== 'expiré');
-  if (pl.unlocked[2] && !cs.length) h += `<p class="note">Aucune offre pour l'instant. Elles arrivent plus souvent quand votre fiabilité est bonne.</p>`;
+  if (!pl.unlocked[2]) h += `<p class="note">Les marchands vous proposeront des contrats quand vous serez Négociant.</p>`;
+  else if (!cs.length) h += `<p class="note">Aucune offre pour l'instant. Elles arrivent plus souvent quand votre fiabilité est bonne.</p>`;
   cs.forEach(c => {
     const n = S().npcs[c.npc], have = E.stockOf(PA(), c.isl, c.g);
     const label = { offre: 'Offre', actif: 'En cours', livré: 'Livré', échoué: 'Manqué' }[c.status];
-    h += `<div class="card ${c.status === 'actif' ? 'hl' : ''}"><div class="row-flex" style="justify-content:space-between"><b>${esc(n.name)}</b><span class="chip ${c.status === 'livré' ? 'green' : c.status === 'échoué' ? 'red' : 'gold'}">${label}</span></div>
-      <p style="margin:4px 0">Livrer <b>${fmt(c.qty)} ${esc(G[c.g].name)}</b> à ${esc(I[c.isl].name)} avant le jour ${c.deadline} (dans ${c.deadline - E.gday()} j), payé <b>${fp(c.price)} §</b> l'unité (cours ≈ ${fp(S().books[c.isl][c.g].ema)} §), soit ${fmt(c.qty * c.price)} § et une faveur.</p>
-      <div class="row-flex">${c.status === 'offre' ? `<button class="btn primary small" data-act="c-accept" data-id="${c.id}">Accepter</button><button class="btn small" data-act="c-decline" data-id="${c.id}">Décliner</button><span class="note">offre valable ${c.offerUntil - E.gday()} j</span>` : ''}
-      ${c.status === 'actif' ? `<button class="btn primary small" data-act="c-deliver" data-id="${c.id}" ${have >= c.qty ? '' : 'disabled'}>Livrer</button><span class="note">Vous en avez ${fmt(have)} à ${esc(I[c.isl].name)}.</span>` : ''}</div></div>`;
+    const left = c.deadline - gd;
+    h += `<div class="card ${c.status === 'actif' ? 'hl' : ''} ${c.status === 'livré' || c.status === 'échoué' ? 'done' : ''}"><div class="row-flex" style="justify-content:space-between"><b>${fmt(c.qty)} ${esc(G[c.g].name)} → ${esc(I[c.isl].name)}</b><span class="chip ${c.status === 'livré' ? 'green' : c.status === 'échoué' ? 'red' : 'gold'}">${label}</span></div>
+      <div class="kv"><span>Pour</span><b>${esc(n.name)}</b><span>Payé</span><b>${fp(c.price)} § l'unité, ${fmt(c.qty * c.price)} § au total <span class="muted">(cours ${fp(S().books[c.isl][c.g].ema)} §)</span></b><span>Échéance</span><b class="${left <= 5 && c.status === 'actif' ? 'down' : ''}">jour ${c.deadline}, dans ${left} j</b>${c.status === 'actif' ? `<span>Votre stock là-bas</span><b class="${have >= c.qty ? 'up' : ''}">${fmt(have)} / ${fmt(c.qty)}</b>` : ''}</div>
+      <div class="row-flex" style="margin-top:6px">${c.status === 'offre' ? `<button class="btn primary small" data-act="c-accept" data-id="${c.id}">Accepter</button><button class="btn small" data-act="c-decline" data-id="${c.id}">Décliner</button><span class="note">offre valable ${c.offerUntil - gd} j</span>` : ''}
+      ${c.status === 'actif' ? `<button class="btn primary small" data-act="c-deliver" data-id="${c.id}" ${have >= c.qty ? '' : 'disabled'}>Livrer</button><button class="btn small" data-act="goto-good" data-isl="${c.isl}" data-g="${c.g}">Voir le bien</button>` : ''}</div></div>`;
   });
-  // rumeurs et modes
+  // personnages
+  const busy = new Set(S().contracts.filter(c => c.status === 'actif' || c.status === 'offre').map(c => c.npc));
+  const npcs = Object.values(S().npcs).sort((a, b) => (b.favors - a.favors) || ((busy.has(b.id) ? 1 : 0) - (busy.has(a.id) ? 1 : 0)) || (Math.abs(b.rel) - Math.abs(a.rel)) || a.name.localeCompare(b.name, 'fr'));
+  h += `<h4>Personnages ${q('faveurs')} ${q('traits')}</h4><p class="note">Ceux qui vous doivent des faveurs et ceux avec qui vous êtes en affaires apparaissent en premier. Touchez un nom pour le détail.</p><div class="npcs">`;
+  npcs.forEach(n => {
+    const role = n.style ? STYLE_NAMES[n.style] : ROLE_NAMES[n.role] + (n.ws ? ' · ' + RECIPES[n.ws.recipe].name.toLowerCase() : '');
+    const open = ui.openNpc === n.id;
+    h += `<div class="npc ${open ? 'open' : ''}"><button class="npc-row" data-act="npc" data-id="${n.id}"><span class="nm"><b>${esc(n.name)}</b><span class="note">${esc(role)} · ${esc(SHORT[n.home])}</span></span>
+      <span class="rel ${n.rel > 10 ? 'up' : n.rel < -10 ? 'down' : 'muted'}">${n.rel > 0 ? '+' : ''}${Math.round(n.rel)}</span>${n.favors ? `<span class="chip gold">${n.favors} faveur${n.favors > 1 ? 's' : ''}</span>` : ''}${busy.has(n.id) ? '<span class="chip">contrat</span>' : ''}<span class="chev">${open ? '▾' : '▸'}</span></button>`;
+    if (open) {
+      const tr = Object.keys(TRAITS).map(k => `<span>${TRAITS[k]}</span><b>${n.traits[k]}/10</b>`).join('');
+      h += `<div class="npc-body">${n.title ? `<p class="note" style="margin:0 0 4px">${esc(n.title)}</p>` : ''}<div class="kv">${tr}<span>Relation ${q('relation')}</span><b>${n.rel > 0 ? '+' : ''}${Math.round(n.rel)}</b></div>
+        ${n.memory.length ? `<p class="note" style="margin:6px 0 0">Se souvient : ${n.memory.slice(0, 3).map(m => esc(m.text)).join(' · ')}</p>` : ''}
+        <div class="row-flex" style="margin-top:8px">${n.favors >= 1 ? `<button class="btn small" data-act="favor" data-npc="${n.id}" data-a="secret">Demander un secret (1)</button>` : ''}${n.favors >= 2 ? `<button class="btn small" data-act="favor" data-npc="${n.id}" data-a="etouffer">Étouffer une enquête (2)</button>` : ''}
+        ${n.favors >= 1 && pl.unlocked[5] && n.role === 'notable' && S().council[n.home] && !S().council[n.home].resolved ? `<button class="btn small" data-act="favor" data-npc="${n.id}" data-a="vote" data-v="1">Vote pour (1)</button><button class="btn small" data-act="favor" data-npc="${n.id}" data-a="vote" data-v="-1">Vote contre (1)</button>` : ''}
+        ${!n.favors ? '<span class="note">Il ne vous doit aucune faveur. Honorez ses contrats pour en gagner.</span>' : ''}</div></div>`;
+    }
+    h += `</div>`;
+  });
+  h += `</div>`;
+  if (susp.length) h += `<h4>Suspicion par île ${q('suspicion')}</h4>` + susp.map(i => `<div class="row-flex" style="justify-content:space-between;font-size:14px"><span>${esc(i.name)}</span><span>${Math.round(S().isl[i.id].suspicion)}</span></div>${bar(S().isl[i.id].suspicion / 100, S().isl[i.id].suspicion > 60 ? 'bad' : 'warn')}`).join('');
   if (pl.unlocked[2]) {
     const f = ui.form;
-    h += `<h4>Lancer une rumeur ${q('lancer')}</h4><p class="note">Une fausse rumeur fait bouger les prix si on y croit. Coût ${E.COSTS.rumor} §, suspicion +10 sur l'île. Il faut y avoir un comptoir ou un informateur.</p>
+    h += `<h4>Lancer une rumeur ${q('lancer')}</h4><p class="note">Coût ${E.COSTS.rumor} §, suspicion +10 sur l'île. Il faut y avoir un comptoir ou un informateur.</p>
       <div class="row-flex"><select data-bind="rIsl">${islOptions(f.rIsl, x => E.present(x) || pl.informants.includes(x))}</select><select data-bind="rGood">${goodOptions(f.rGood)}</select>
       <select data-bind="rDir"><option value="1" ${+f.rDir > 0 ? 'selected' : ''}>pénurie (hausse)</option><option value="-1" ${+f.rDir < 0 ? 'selected' : ''}>abondance (baisse)</option></select>
       <button class="btn danger" data-act="rumor">Répandre</button></div>`;
   }
   if (pl.unlocked[5]) {
     const f = ui.form;
-    h += `<h4>Lancer une mode ${q('mode')}</h4><p class="note">Financer un patricien en vue triple la demande d'un bien sur une île pendant 30 jours. Coût ${fmt(E.COSTS.fad)} §.</p>
+    h += `<h4>Lancer une mode ${q('mode')}</h4><p class="note">La demande d'un bien triple sur une île pendant 30 jours. Coût ${fmt(E.COSTS.fad)} §.</p>
       <div class="row-flex"><select data-bind="fadIsl">${islOptions(f.fadIsl)}</select><select data-bind="fadGood">${goodOptions(f.fadGood, ['lanterne', 'essence', 'accu', 'outils'])}</select><button class="btn primary" data-act="fad">Lancer la mode</button></div>`;
   }
-  // PNJ
-  h += `<h4>Personnages de l'archipel ${q('faveurs')} ${q('traits')}</h4><p class="note">Les faveurs se gagnent en honorant des contrats. Secret (1 faveur) : vérifie les rumeurs de son île, révèle ce qui s'y prépare et l'état du vote au Conseil. Étouffer (2 faveurs) : -35 de suspicion sur son île.</p>`;
-  ISLANDS.forEach(i => {
-    const list = Object.values(S().npcs).filter(n => n.home === i.id);
-    h += `<div class="card"><b>${esc(i.name)}</b><table class="t" style="margin-top:4px"><tbody>`;
-    list.forEach(n => {
-      const role = n.style ? STYLE_NAMES[n.style] : ROLE_NAMES[n.role] + (n.ws ? ' · ' + RECIPES[n.ws.recipe].name.toLowerCase() : '');
-      const tr = Object.keys(TRAITS).map(k => `${TRAITS[k].slice(0, 3)} ${n.traits[k]}`).join(' · ');
-      h += `<tr><td style="width:46%"><b>${esc(n.name)}</b><br><span class="traits">${esc(n.title || role)}<br>${tr}</span></td>
-        <td style="width:22%"><span class="note">relation ${n.rel > 0 ? '+' : ''}${Math.round(n.rel)} ${q('relation')}</span>${bar((n.rel + 100) / 200, ' ')}${n.favors ? `<span class="chip gold">${n.favors} faveur(s)</span>` : ''}</td>
-        <td class="n">${n.favors >= 1 ? `<button class="btn small" data-act="favor" data-npc="${n.id}" data-a="secret">Secret</button>` : ''}${n.favors >= 2 ? ` <button class="btn small" data-act="favor" data-npc="${n.id}" data-a="etouffer">Étouffer</button>` : ''}
-        ${n.favors >= 1 && pl.unlocked[5] && n.role === 'notable' && S().council[n.home] && !S().council[n.home].resolved ? `<br><button class="btn small" data-act="favor" data-npc="${n.id}" data-a="vote" data-v="1">Vote pour</button> <button class="btn small" data-act="favor" data-npc="${n.id}" data-a="vote" data-v="-1">contre</button>` : ''}</td></tr>`;
-      if (n.memory.length) h += `<tr><td colspan="3" class="note" style="padding-top:0">Se souvient : ${esc(n.memory[0].text)}</td></tr>`;
-    });
-    h += `</tbody></table></div>`;
-  });
   return h;
 }
 
 // ---------------------------------------------------------------- CONSEILS
 function pConseils() {
-  const pl = P();
-  let h = `<h2>Conseils des îles ${q('conseil')}</h2><p class="sub">Chaque saison, chaque Conseil vote une mesure au 31<sup>e</sup> jour. ${pl.unlocked[5] ? 'En tant que Notable, vous pouvez peser sur le vote.' : 'Devenez Notable (prestige 50) pour peser sur les votes.'}</p>`;
-  ISLANDS.forEach(i => {
+  const pl = P(), gd = E.gday();
+  let h = `<h2>Conseils des îles ${q('conseil')}</h2><p class="sub">Chaque saison, chaque Conseil vote une mesure le 31<sup>e</sup> jour. ${pl.unlocked[5] ? 'En tant que Notable, vous pouvez peser sur le vote.' : 'Devenez Notable (prestige 50) pour peser sur les votes.'}</p>`;
+  const order = ISLANDS.slice().sort((a, b) => {
+    const pa = S().council[a.id], pb = S().council[b.id];
+    const ka = pa && !pa.resolved ? (pa.vote - gd) * 10 + Math.abs(pa.base + pa.sway - 0.5) * 10 : 9999;
+    const kb = pb && !pb.resolved ? (pb.vote - gd) * 10 + Math.abs(pb.base + pb.sway - 0.5) * 10 : 9999;
+    return ka - kb;
+  });
+  order.forEach(i => {
     const p = S().council[i.id], st = S().isl[i.id];
-    h += `<div class="card ${ui.sel === i.id ? 'hl' : ''}"><div class="row-flex" style="justify-content:space-between"><b>${esc(i.name)}</b><span class="note">taxe ${(st.tax * 100).toFixed(1).replace('.', ',')} %</span></div>`;
+    h += `<div class="card ${p && !p.resolved ? 'hl' : 'done'}"><div class="row-flex" style="justify-content:space-between"><b>${esc(i.name)}</b>${p && !p.resolved ? `<span class="chip gold">vote dans ${p.vote - gd} j</span>` : ''}</div>`;
     if (p) {
-      const known = E.present(i.id) || pl.informants.includes(i.id);
+      const kn = E.present(i.id) || pl.informants.includes(i.id);
       const sup = p.base + p.sway;
       let est;
       if (p.resolved) est = `<span class="chip ${p.passed ? 'green' : 'red'}">${p.passed ? 'Adoptée' : 'Rejetée'} (${Math.round(sup * 100)} %)</span>`;
       else if (pl.insider[i.id]) est = `<span class="chip gold">Secret d'initié : ${Math.round(sup * 100)} % pour</span>`;
-      else if (known) { const c = Math.round((sup + p.noise) * 100); est = `<span class="chip">Estimation : ${Math.max(0, c - 15)} à ${Math.min(100, c + 15)} % pour</span>`; }
+      else if (kn) { const c = Math.round((sup + p.noise) * 100); est = `<span class="chip">Estimation : ${Math.max(0, c - 15)} à ${Math.min(100, c + 15)} % pour</span>`; }
       else est = `<span class="chip blue">Tendance inconnue sans comptoir ni informateur</span>`;
-      h += `<p style="margin:4px 0">« ${esc(p.text)} »</p><div class="row-flex">${est}${q('estimation')}${!p.resolved ? `<span class="note">vote dans ${p.vote - E.gday()} j</span>` : ''}</div>`;
-      h += `<div class="chips" style="margin-top:6px">${Object.keys(i.factions).map(k => `<span class="chip ${p.stance[k] > 0 ? 'green' : p.stance[k] < 0 ? 'red' : ''}" title="${p.stance[k] > 0 ? 'pour' : p.stance[k] < 0 ? 'contre' : 'neutre'}">${esc(FACTIONS[k])} ${Math.round(i.factions[k] * 100)} %</span>`).join('')}${q('factions')}</div>`;
+      h += `<p style="margin:4px 0;font-size:16px">« ${esc(p.text)} »</p><div class="row-flex">${est}${q('estimation')}</div>`;
+      h += `<div class="factions">${Object.keys(i.factions).map(k => `<span class="${p.stance[k] > 0 ? 'pour' : p.stance[k] < 0 ? 'contre' : 'neutre'}" style="flex:${i.factions[k]}" title="${esc(FACTIONS[k])} : ${p.stance[k] > 0 ? 'pour' : p.stance[k] < 0 ? 'contre' : 'neutre'}">${esc(FACTIONS[k].split(' ')[0])} ${Math.round(i.factions[k] * 100)} %</span>`).join('')}</div>
+        <p class="note" style="margin:2px 0 6px">${q('factions')} Vert : pour · rouge : contre · gris : neutre. Largeur = poids au Conseil.</p>`;
       if (pl.unlocked[5] && !p.resolved) {
         h += `<div class="row-flex"><input class="num" type="number" min="50" step="50" data-bind="don" value="${esc(ui.form.don)}"> §
           ${q('influencer')}<button class="btn small" data-act="sway" data-isl="${i.id}" data-k="don" data-v="1">Don pour</button><button class="btn small" data-act="sway" data-isl="${i.id}" data-k="don" data-v="-1">Don contre</button>
           <button class="btn small danger" data-act="sway" data-isl="${i.id}" data-k="corruption" data-v="1">Corrompre pour (${E.COSTS.corruption} §)</button><button class="btn small danger" data-act="sway" data-isl="${i.id}" data-k="corruption" data-v="-1">contre</button></div>`;
       }
     }
-    const laws = st.laws.filter(l => !l.until || l.until > E.gday());
-    if (laws.length || Object.keys(st.banned).length) h += `<p class="note" style="margin-top:6px">En vigueur : ${[...Object.keys(st.banned).map(g => 'interdiction de ' + G[g].name.toLowerCase()), ...laws.map(l => l.text)].map(esc).join(' · ')}</p>`;
-    h += `</div>`;
+    const laws = [`taxe de bourse ${(st.tax * 100).toFixed(1).replace('.', ',')} %`, ...Object.keys(st.banned).map(g => 'interdiction de ' + G[g].name.toLowerCase()), ...st.laws.filter(l => !l.until || l.until > gd).map(l => l.text)];
+    h += `<details class="fold"><summary>Lois en vigueur (${laws.length})</summary><p class="note">${laws.map(esc).join(' · ')}</p></details></div>`;
   });
   return h;
 }
 
 // ---------------------------------------------------------------- RUMEURS
 function pRumeurs() {
-  const rs = E.knownRumors();
-  let h = `<h2>Rumeurs ${q('rumeurs')}</h2><p class="sub">Les rumeurs voyagent avec les navires. Certaines annoncent un vrai choc avant tout le monde ; d'autres sont lancées pour manipuler les prix. Les marchands crédules y réagissent, ce qui peut suffire à les rendre vraies.</p>`;
+  const rs = E.knownRumors(), gd = E.gday();
+  let h = `<h2>Rumeurs ${q('rumeurs')}</h2><p class="sub">Elles voyagent avec les navires. Certaines annoncent un vrai choc avant tout le monde, d'autres sont lancées pour manipuler les prix.</p>`;
   if (!rs.length) return h + `<p class="note">Aucune rumeur ne vous est parvenue.</p>`;
   rs.forEach(r => {
     const rev = P().revealed[r.id];
-    const status = q('statut') + (r.status === 'démentie' ? '<span class="chip red">démentie</span>' : r.status === 'confirmée' ? '<span class="chip green">confirmée</span>' : '<span class="chip">circule</span>');
-    h += `<div class="card"><div class="row-flex" style="justify-content:space-between"><span class="note">jour ${r.day} · ${esc(I[r.origin].name)}${r.src === 'player' ? ' · lancée par vous' : ''}</span>${status}</div>
-      <p style="margin:4px 0;font-style:italic">« ${esc(r.text)} »</p>
-      <div class="row-flex"><span class="note" style="width:110px">crédibilité ${Math.round(r.cred)} ${q('credibilite')}</span><div style="flex:1">${bar(r.cred / 100, ' ')}</div>
+    const status = r.status === 'démentie' ? '<span class="chip red">démentie</span>' : r.status === 'confirmée' ? '<span class="chip green">confirmée</span>' : '<span class="chip">circule</span>';
+    const fresh = r.heard >= gd - 2 && r.status === 'circule';
+    let eff = '';
+    if (r.g) {
+      const k = known(r.island, r.g);
+      const hist = E.present(r.island) ? S().books[r.island][r.g].hist : null;
+      const before = hist && hist.length > (gd - r.day) ? hist[hist.length - 1 - Math.max(0, gd - r.day)] : null;
+      const chg = k && before ? k.p / before - 1 : null;
+      eff = `<div class="eff"><span>${esc(G[r.g].name)} à ${esc(I[r.island].name)} : <b>${k ? fp(k.p) + ' §' : '?'}</b>${chg != null ? ` <span class="${chg > 0.01 ? 'up' : chg < -0.01 ? 'down' : 'muted'}">${pct(chg)} depuis la rumeur</span>` : k && k.delay ? ` <span class="age">info de ${k.delay} j</span>` : ''}</span>
+        <span class="note">${r.dir > 0 ? 'pousse à la hausse' : 'pousse à la baisse'}</span><button class="btn small" data-act="goto-good" data-isl="${r.island}" data-g="${r.g}">Voir la bourse</button></div>`;
+    }
+    h += `<div class="card ${fresh ? 'hl' : ''} ${r.status !== 'circule' ? 'done' : ''}"><div class="row-flex" style="justify-content:space-between"><span class="note">${fresh ? '<b class="newtag">nouveau</b> ' : ''}jour ${r.day} · ${esc(I[r.origin].name)}${r.src === 'player' ? ' · lancée par vous' : ''}</span><span>${status}${q('statut')}</span></div>
+      <p style="margin:4px 0;font-style:italic;font-size:16px">« ${esc(r.text)} »</p>${eff}
+      <div class="row-flex"><span class="note" style="width:120px">crédibilité ${Math.round(r.cred)} ${q('credibilite')}</span><div style="flex:1">${bar(r.cred / 100, ' ')}</div>
       ${rev && r.status === 'circule' ? (r.truth ? '<span class="verdict-t">VRAIE</span>' : '<span class="verdict-f">FAUSSE</span>') : ''}</div></div>`;
   });
   return h;
@@ -930,8 +1240,14 @@ document.addEventListener('click', e => {
   if (!t) return;
   const d = t.dataset, f = ui.form;
   switch (d.act) {
-    case 'sel-isl': ui.sel = d.isl; if (ui.tab !== 'bourse' && ui.tab !== 'ateliers' && ui.tab !== 'conseils' && ui.tab !== 'navigation') ui.tab = 'bourse'; ui.form.price = ''; render(true); break;
-    case 'goto': ui.sel = d.isl; ui.tab = 'bourse'; if (isM()) { setView('panel'); break; } render(true); break;
+    case 'sel-isl': ui.sel = d.isl; ui.bview = 'ile'; if (ui.tab !== 'bourse' && ui.tab !== 'ateliers' && ui.tab !== 'conseils' && ui.tab !== 'navigation') ui.tab = 'bourse'; ui.form.price = ''; render(true); break;
+    case 'goto-good': ui.sel = d.isl; ui.tab = 'bourse'; ui.bview = 'ile'; ui.good = d.g; f.bq = 10; f.sq = null; f.sp = ''; if (isM()) ui.mview = 'panel'; render(true); $('panel').scrollTop = 0; break;
+    case 'bview': ui.tab = 'bourse'; ui.bview = d.v; if (isM()) ui.mview = 'panel'; render(true); $('panel').scrollTop = 0; break;
+    case 'stockview': ui.stockView = d.v; render(true); break;
+    case 'set-dest': f.to = d.v; render(true); break;
+    case 'npc': ui.openNpc = ui.openNpc === d.id ? null : d.id; render(true); break;
+    case 'do-trade': { const c = ui.pending; ui.pending = null; closeModal(); if (c) c(); break; }
+    case 'goto': ui.sel = d.isl; ui.tab = 'bourse'; ui.bview = 'ile'; if (isM()) { setView('panel'); break; } render(true); break;
     case 'mnav': closeModal();
       if (d.v === 'carte' || d.v === 'journal') setView(d.v);
       else if (d.v === 'plus') moreSheet();
@@ -946,16 +1262,12 @@ document.addEventListener('click', e => {
       document.querySelectorAll(`[data-bind="${d.k}"]`).forEach(x => { x.value = f[d.k]; });
       updateTrade(); break;
     }
-    case 'buy': act(E.A.buyMarket(ui.sel, d.g, Math.floor(readInt(f.bq)))); f.sq = null; break;
-    case 'sell': if (true) { const r = E.A.sellMarket(ui.sel, d.g, Math.floor(readInt(f.sq == null ? E.stockOf(PA(), ui.sel, d.g) : f.sq))); if (r.ok) tuto().sold = true; act(r); f.sq = null; break; } act(E.A.sellMarket(ui.sel, d.g, Math.floor(readInt(f.sq == null ? E.stockOf(PA(), ui.sel, d.g) : f.sq)))); f.sq = null; break;
-    case 'list': {
-      const l = listSummary(ui.sel, d.g);
-      const r = E.A.limit(ui.sel, d.g, 'sell', l.p, l.q);
-      if (r.ok) { tuto().sold = true; f.sq = null; f.sp = ''; }
-      act(r); break;
-    }
+    case 'buy': confirmTrade('buy', d.g); break;
+    case 'sell': confirmTrade('sell', d.g); break;
+    case 'sell-old': act(E.A.sellMarket(ui.sel, d.g, Math.floor(readInt(f.sq == null ? E.stockOf(PA(), ui.sel, d.g) : f.sq)))); f.sq = null; break;
+    case 'list': confirmTrade('list', d.g); break;
     case 'adv': if (e.target.tagName === 'SUMMARY') ui[d.k] = !t.open; break;
-    case 'limit': act(E.A.limit(ui.sel, d.g, d.side, readInt(f.price) || S().books[ui.sel][d.g].ema, Math.floor(readInt(f.qty)))); break;
+    case 'limit': confirmTrade('limit-' + d.side, d.g); break;
     case 'cancel': act(E.A.cancel(d.isl, d.g, +d.id)); break;
     case 'black': act(E.A.blackSell(d.isl, d.g, 10)); break;
     case 'open-cpt': act(E.A.openComptoir(d.isl)); break;

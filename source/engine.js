@@ -129,6 +129,7 @@ function refund(o, isl, g) {
   else if (o.qty > 0) addStock(a, isl, g, o.qty);
   o.qty = 0;
 }
+function fx(isl, v) { (S.fx || (S.fx = [])).push({ isl, v }); if (S.fx.length > 50) S.fx.shift(); }
 function exec(isl, g, bo, so, q, p, resting) {
   const ba = S.accounts[bo.a], sa = S.accounts[so.a], b = S.books[isl][g];
   bo.qty -= q; so.qty -= q;
@@ -138,6 +139,7 @@ function exec(isl, g, bo, so, q, p, resting) {
   S.isl[isl].treasury += p * q * (bo.tax + so.tax);
   b.last = p; b.vol += q; b.vN += p * q; b.vD += q;
   if (S.diag) S.diag.push([gday(), isl, g, bo.a, so.a, q, r2(p)]);
+  if (!S.warm && (bo.a === 'player') !== (so.a === 'player')) fx(isl, so.a === 'player' ? p * q * (1 - so.tax) : -p * q * (1 + bo.tax));
   if (resting && resting.a === 'player') {
     log('bourse', `Ordre exécuté à ${I[isl].name} : ${resting.side === 'buy' ? 'achat' : 'vente'} de ${q} ${G[g].name} à ${r2(p)} §.`);
   }
@@ -1529,7 +1531,7 @@ const A = {
     if (stockOf(PA(), c.isl, c.g) < c.qty) return ko(`Il vous faut ${c.qty} ${G[c.g].name} dans votre entrepôt de ${I[c.isl].name}.`);
     addStock(PA(), c.isl, c.g, -c.qty);
     addStock(S.accounts['npc:' + c.npc], c.isl, c.g, c.qty);
-    const pay = c.qty * c.price; PA().cash += pay;
+    const pay = c.qty * c.price; PA().cash += pay; fx(c.isl, pay);
     const n = S.npcs[c.npc];
     n.rel = clamp(n.rel + 12, -100, 100); n.favors++;
     pl.fiabilite = clamp(pl.fiabilite + 3, 0, 100); pl.prestigeBase += 1; pl.contractsDone++;
@@ -1632,7 +1634,7 @@ const A = {
     const price = ref * 2.2 * (1 - 0.02 * sold);
     addStock(PA(), isl, g, -qty);
     addStock(S.accounts['pop:' + isl + ':bourgeois'], isl, g, qty);
-    PA().cash += price * qty; S.blackSold[isl] = sold + qty;
+    PA().cash += price * qty; S.blackSold[isl] = sold + qty; fx(isl, price * qty);
     st.suspicion = clamp(st.suspicion + 2 + qty * 0.5, 0, 100);
     P().probite = clamp(P().probite - 1, 0, 100);
     const msg = `Marché noir de ${I[isl].name} : ${qty} ${G[g].name} vendus ${fmt(price * qty)} §.`;

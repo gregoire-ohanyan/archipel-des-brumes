@@ -1,5 +1,5 @@
 // Service worker : garde le jeu en mémoire pour jouer hors ligne
-const VERSION = 'cde932708d';
+const VERSION = '1a3e6e9dc1';
 const CACHE = 'archipel-' + VERSION;
 const CORE = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon.png'];
 self.addEventListener('install', e => {
