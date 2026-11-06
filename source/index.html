@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>L'Archipel des Brumes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>/*CSS*/</style>
+</head>
+<body>
+<header id="top">
+  <div class="logo">L'Archipel des Brumes<small>COMPAGNIE DE NÉGOCE</small></div>
+  <div class="date" id="date"></div><button class="qm" data-act="explain" data-k="saisons" aria-label="Explication">?</button>
+  <div class="stat cash-stat"><span>Sceaux <button class="qm" data-act="explain" data-k="sceaux" aria-label="Explication">?</button></span><b id="cash"></b></div>
+  <div class="stat"><span>Valeur nette <button class="qm" data-act="explain" data-k="valeur" aria-label="Explication">?</button></span><b id="nw"></b></div>
+  <div class="stat"><span>Prestige <button class="qm" data-act="explain" data-k="prestige" aria-label="Explication">?</button></span><b id="prest"></b></div>
+  <div class="stage" id="stage" data-act="stage-info" title="Votre stade"></div>
+  <div class="spacer"></div>
+  <div class="speed" title="Espace : pause · 1, 2, 3 : vitesses">
+    <button data-v="0" title="Pause">❚❚</button><button data-v="1" title="Vitesse normale">▶</button><button data-v="3" title="Rapide">▶▶</button><button data-v="8" title="Très rapide">▶▶▶</button>
+  </div>
+  <button class="menu-btn" data-act="save">Sauver</button>
+  <button class="menu-btn" data-act="help">Aide</button>
+  <button class="menu-btn" data-act="newgame-ask">Nouvelle partie</button>
+  <button class="menu-btn m-only" data-act="mmenu" aria-label="Menu">☰</button>
+</header>
+<div id="main">
+  <section id="left">
+    <div id="mapwrap">
+      <svg id="map" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="legend"><b>C</b> votre comptoir · <b>n j</b> retard de vos nouvelles · grands navires : capitaines · points : caboteurs</div>
+      <div class="maphint">Touchez une île pour voir sa bourse</div>
+      <div id="mcard" class="m-only"></div>
+    </div>
+    <div id="journal"><h3><span>Journal de bord</span><span class="note" style="font-family:var(--body);letter-spacing:0">les plus récents en haut</span></h3><ol id="jlist"></ol></div>
+  </section>
+  <section id="right"><nav id="tabs"></nav><div id="panel"></div></section>
+</div>
+<nav id="bnav" class="m-only">
+  <button data-act="mnav" data-v="carte"><i>⚓</i>Carte</button>
+  <button data-act="mnav" data-v="bourse"><i>⚖</i>Bourse</button>
+  <button data-act="mnav" data-v="navigation"><i>⛵</i>Navigation</button>
+  <button data-act="mnav" data-v="entrepots"><i>⌂</i>Comptoirs</button>
+  <button data-act="mnav" data-v="plus"><i>☰</i>Plus<span id="jbadge" class="badge" style="display:none"></span></button>
+</nav>
+<div id="modal"></div>
+<div id="toasts"></div>
+<script>/*DATA*/</script>
+<script>/*ENGINE*/</script>
+<script>/*GUIDE*/</script>
+<script>/*UI*/</script>
+</body>
+</html>
